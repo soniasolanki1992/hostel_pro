@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, ArrowRight, Shield, RefreshCw, Phone, Mail, Clock } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Shield, RefreshCw, Phone, Mail, Clock, MessageCircle } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { LanguageToggle } from '@/components/LanguageToggle';
 
@@ -10,7 +10,7 @@ export default function DharamshalaContactPage() {
   const { t } = useLanguage();
   const [phoneNumber, setPhoneNumber] = useState('');
   const [email, setEmail] = useState('');
-  const [contactMethod, setContactMethod] = useState<'phone' | 'email'>('phone');
+  const [contactMethod, setContactMethod] = useState<'phone' | 'whatsapp' | 'email'>('phone');
   const [otpSent, setOtpSent] = useState(false);
   const [resendTimer, setResendTimer] = useState(0);
   const [errors, setErrors] = useState<string[]>([]);
@@ -23,7 +23,7 @@ export default function DharamshalaContactPage() {
   }, [resendTimer]);
 
   const isInputValid = () => {
-    if (contactMethod === 'phone') {
+    if (contactMethod !== 'email') {
       return phoneNumber && /^[6-9]\d{9}$/.test(phoneNumber);
     } else {
       return email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -33,9 +33,9 @@ export default function DharamshalaContactPage() {
   const validateInput = () => {
     const newErrors: string[] = [];
 
-    if (contactMethod === 'phone' && !phoneNumber) {
+    if (contactMethod !== 'email' && !phoneNumber) {
       newErrors.push('Phone number is required');
-    } else if (contactMethod === 'phone' && !/^[6-9]\d{9}$/.test(phoneNumber)) {
+    } else if (contactMethod !== 'email' && !/^[6-9]\d{9}$/.test(phoneNumber)) {
       newErrors.push('Please enter a valid 10-digit phone number');
     }
 
@@ -60,7 +60,8 @@ export default function DharamshalaContactPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          [contactMethod]: contactMethod === 'phone' ? phoneNumber : email,
+          ...(contactMethod === 'email' ? { email } : { phone: phoneNumber }),
+          channel: contactMethod === 'phone' ? 'sms' : contactMethod === 'whatsapp' ? 'whatsapp' : 'email',
           vertical: 'dharamshala'
         })
       });
@@ -71,11 +72,12 @@ export default function DharamshalaContactPage() {
         localStorage.removeItem('application_draft_dharamshala');
         localStorage.removeItem('otp_verified_mobile');
         localStorage.removeItem('otp_verified_email');
-        if (contactMethod === 'phone') {
-          localStorage.setItem('otp_verified_mobile', phoneNumber);
-        } else {
+        if (contactMethod === 'email') {
           localStorage.setItem('otp_verified_email', email);
+        } else {
+          localStorage.setItem('otp_verified_mobile', phoneNumber);
         }
+        localStorage.setItem('otp_channel', contactMethod);
         window.location.href = `/apply/dharamshala/verify?token=${encodeURIComponent(data.token)}`;
       } else {
         const error = await response.json();
@@ -195,7 +197,7 @@ export default function DharamshalaContactPage() {
           <div className="card p-8 mb-8">
             <h3 className="text-xl font-semibold mb-6" style={{ color: "var(--text-primary)" }}>
               {t('Choose Contact Method', 'संपर्क माध्यम चुनें')}</h3>
-            <div className="grid gap-4 md:grid-cols-2 mb-8">
+            <div className="grid gap-4 md:grid-cols-3 mb-8">
               <button
                 className={`p-6 rounded-lg border-2 transition-all ${
                   contactMethod === 'phone'
@@ -209,7 +211,22 @@ export default function DharamshalaContactPage() {
                 <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
                   {t('Fast and secure OTP verification via SMS', 'एसएमएस द्वारा तेज़ और सुरक्षित ओटीपी सत्यापन')}</p>
               </button>
-              
+
+              <button
+                className={`p-6 rounded-lg border-2 transition-all ${
+                  contactMethod === 'whatsapp'
+                    ? 'border-green-500 bg-green-50'
+                    : 'border-gray-300 hover:border-gray-400'
+                }`}
+                onClick={() => setContactMethod('whatsapp')}
+              >
+                <MessageCircle className="w-8 h-8 mx-auto mb-3" style={{ color: contactMethod === 'whatsapp' ? '#16a34a' : 'var(--color-gray-600)' }} />
+                <h4 className="font-semibold mb-2">{t('WhatsApp', 'व्हाट्सएप')}</h4>
+                <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+                  {t('Get your OTP on WhatsApp', 'अपना ओटीपी व्हाट्सएप पर प्राप्त करें')}
+                </p>
+              </button>
+
               <button
                 className={`p-6 rounded-lg border-2 transition-all ${
                   contactMethod === 'email'
@@ -225,10 +242,10 @@ export default function DharamshalaContactPage() {
               </button>
             </div>
 
-            {contactMethod === 'phone' && (
+            {contactMethod !== 'email' && (
               <div className="mb-6">
                 <label className="block text-sm font-medium mb-2" style={{ color: "var(--text-primary)" }}>
-                  {t('Mobile Number', 'मोबाइल नंबर')}</label>
+                  {contactMethod === 'whatsapp' ? t('WhatsApp Number', 'व्हाट्सएप नंबर') : t('Mobile Number', 'मोबाइल नंबर')}</label>
                 <div className="relative">
                   <input
                     type="tel"
@@ -251,7 +268,7 @@ export default function DharamshalaContactPage() {
                   />
                   <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5" style={{ color: "var(--color-gray-400)" }} />
                 </div>
-                {errors.length > 0 && contactMethod === 'phone' && (
+                {errors.length > 0 && (
                   <p className="text-sm mt-1" style={{ color: 'var(--color-red-500)' }}>{errors[0]}</p>
                 )}
                 <p className="text-sm mt-2" style={{ color: "var(--text-secondary)" }}>
@@ -336,7 +353,7 @@ export default function DharamshalaContactPage() {
                 <h4 className="font-semibold mb-2" style={{ color: "var(--text-primary)" }}>
                   {t('OTP Sent Successfully!', 'ओटीपी सफलतापूर्वक भेजा गया!')}</h4>
                 <p className="text-sm mb-4" style={{ color: "var(--text-secondary)" }}>
-                  Please check your {contactMethod === 'phone' ? 'SMS messages' : 'email'} for the 6-digit code.
+                  Please check your {contactMethod === 'phone' ? 'SMS messages' : contactMethod === 'whatsapp' ? 'WhatsApp' : 'email'} for the 6-digit code.
                 </p>
                 
                 {resendTimer > 0 ? (

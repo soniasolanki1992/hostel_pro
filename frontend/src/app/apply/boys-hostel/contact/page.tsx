@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, ArrowRight, Shield, RefreshCw, Phone, Mail, Clock } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Shield, RefreshCw, Phone, Mail, Clock, MessageCircle } from 'lucide-react';
 import { Input } from '@/components/forms/Input';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { LanguageToggle } from '@/components/LanguageToggle';
@@ -11,7 +11,7 @@ export default function ContactOTPPage() {
   const { t } = useLanguage();
   const [phoneNumber, setPhoneNumber] = useState('');
   const [email, setEmail] = useState('');
-  const [contactMethod, setContactMethod] = useState<'phone' | 'email'>('phone');
+  const [contactMethod, setContactMethod] = useState<'phone' | 'whatsapp' | 'email'>('phone');
   const [otpSent, setOtpSent] = useState(false);
   const [resendTimer, setResendTimer] = useState(0);
   const [errors, setErrors] = useState<string[]>([]);
@@ -25,7 +25,7 @@ export default function ContactOTPPage() {
 
   // Pure validation function (no setState) - safe for render
   const isInputValid = () => {
-    if (contactMethod === 'phone') {
+    if (contactMethod !== 'email') {
       return phoneNumber && /^[6-9]\d{9}$/.test(phoneNumber);
     } else {
       return email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -36,9 +36,9 @@ export default function ContactOTPPage() {
   const validateInput = () => {
     const newErrors: string[] = [];
 
-    if (contactMethod === 'phone' && !phoneNumber) {
+    if (contactMethod !== 'email' && !phoneNumber) {
       newErrors.push('Phone number is required');
-    } else if (contactMethod === 'phone' && !/^[6-9]\d{9}$/.test(phoneNumber)) {
+    } else if (contactMethod !== 'email' && !/^[6-9]\d{9}$/.test(phoneNumber)) {
       newErrors.push('Please enter a valid 10-digit phone number');
     }
 
@@ -64,7 +64,8 @@ export default function ContactOTPPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          [contactMethod]: contactMethod === 'phone' ? phoneNumber : email,
+          ...(contactMethod === 'email' ? { email } : { phone: phoneNumber }),
+          channel: contactMethod === 'phone' ? 'sms' : contactMethod === 'whatsapp' ? 'whatsapp' : 'email',
           vertical: 'boys-hostel' // This would come from previous step
         })
       });
@@ -76,11 +77,12 @@ export default function ContactOTPPage() {
         localStorage.removeItem('otp_verified_mobile');
         localStorage.removeItem('otp_verified_email');
         // Store verified contact for use in application form
-        if (contactMethod === 'phone') {
-          localStorage.setItem('otp_verified_mobile', phoneNumber);
-        } else {
+        if (contactMethod === 'email') {
           localStorage.setItem('otp_verified_email', email);
+        } else {
+          localStorage.setItem('otp_verified_mobile', phoneNumber);
         }
+        localStorage.setItem('otp_channel', contactMethod);
         // Success - navigate to OTP verification with token
         window.location.href = `/apply/boys-hostel/verify?token=${encodeURIComponent(data.token)}`;
       } else {
@@ -213,7 +215,7 @@ export default function ContactOTPPage() {
             <h3 className="text-xl font-semibold mb-6" style={{ color: "var(--text-primary)" }}>
               Choose Contact Method
             </h3>
-            <div className="grid gap-4 md:grid-cols-2 mb-8">
+            <div className="grid gap-4 md:grid-cols-3 mb-8">
               <button
                 className={`p-6 rounded-lg border-2 transition-all ${
                   contactMethod === 'phone'
@@ -228,7 +230,22 @@ export default function ContactOTPPage() {
                   {t('Fast and secure OTP verification via SMS', 'एसएमएस द्वारा तेज़ और सुरक्षित ओटीपी सत्यापन')}
                 </p>
               </button>
-              
+
+              <button
+                className={`p-6 rounded-lg border-2 transition-all ${
+                  contactMethod === 'whatsapp'
+                    ? 'border-green-500 bg-green-50'
+                    : 'border-gray-300 hover:border-gray-400'
+                }`}
+                onClick={() => setContactMethod('whatsapp')}
+              >
+                <MessageCircle className="w-8 h-8 mx-auto mb-3" style={{ color: contactMethod === 'whatsapp' ? '#16a34a' : 'var(--color-gray-600)' }} />
+                <h4 className="font-semibold mb-2">{t('WhatsApp', 'व्हाट्सएप')}</h4>
+                <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+                  {t('Get your OTP on WhatsApp', 'अपना ओटीपी व्हाट्सएप पर प्राप्त करें')}
+                </p>
+              </button>
+
               <button
                 className={`p-6 rounded-lg border-2 transition-all ${
                   contactMethod === 'email'
@@ -246,11 +263,11 @@ export default function ContactOTPPage() {
             </div>
 
             {/* Contact Input */}
-            {contactMethod === 'phone' && (
+            {contactMethod !== 'email' && (
               <div className="mb-6">
                 <Input
                   type="tel"
-                  label={t('Mobile Number', 'मोबाइल नंबर')}
+                  label={contactMethod === 'whatsapp' ? t('WhatsApp Number', 'व्हाट्सएप नंबर') : t('Mobile Number', 'मोबाइल नंबर')}
                   value={phoneNumber}
                   onChange={(e) => {
                     const val = e.target.value.replace(/\D/g, '').slice(0, 10);
@@ -345,7 +362,7 @@ export default function ContactOTPPage() {
                   OTP Sent Successfully!
                 </h4>
                 <p className="text-sm mb-4" style={{ color: "var(--text-secondary)" }}>
-                  Please check your {contactMethod === 'phone' ? 'SMS messages' : 'email'} for the 6-digit code.
+                  Please check your {contactMethod === 'phone' ? 'SMS messages' : contactMethod === 'whatsapp' ? 'WhatsApp' : 'email'} for the 6-digit code.
                 </p>
                 
                 {resendTimer > 0 ? (

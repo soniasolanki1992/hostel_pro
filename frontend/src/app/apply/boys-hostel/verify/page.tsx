@@ -14,12 +14,13 @@ export default function VerifyOTPPage() {
   const [timeLeft, setTimeLeft] = useState(60);
   const [isVerifying, setIsVerifying] = useState(false);
   const [attempts, setAttempts] = useState(0);
-  const [sentTo, setSentTo] = useState<'mobile' | 'email'>('mobile');
+  const [sentTo, setSentTo] = useState<'mobile' | 'whatsapp' | 'email'>('mobile');
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
   useEffect(() => {
     try {
-      setSentTo(localStorage.getItem('otp_verified_email') ? 'email' : 'mobile');
+      const channel = localStorage.getItem('otp_channel');
+      setSentTo(localStorage.getItem('otp_verified_email') ? 'email' : channel === 'whatsapp' ? 'whatsapp' : 'mobile');
     } catch {
       /* localStorage unavailable — default to mobile */
     }
@@ -370,7 +371,7 @@ export default function VerifyOTPPage() {
 
             <div className="text-center mb-6">
               <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-                <strong>Tip:</strong> Enter the 6-digit code sent to your {sentTo === 'email' ? 'email address' : 'mobile number'}. The code is valid for 10 minutes.
+                <strong>Tip:</strong> Enter the 6-digit code sent to your {sentTo === 'email' ? 'email address' : sentTo === 'whatsapp' ? 'WhatsApp' : 'mobile number'}. The code is valid for 10 minutes.
               </p>
               {sentTo === 'email' && (
                 <p className="text-sm mt-2" style={{ color: "var(--text-secondary)" }}>

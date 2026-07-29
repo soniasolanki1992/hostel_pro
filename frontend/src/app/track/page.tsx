@@ -13,6 +13,7 @@ export default function TrackingPage() {
   const { t } = useLanguage();
   const [trackingId, setTrackingId] = useState('');
   const [mobile, setMobile] = useState('');
+  const [channel, setChannel] = useState<'sms' | 'whatsapp'>('sms');
   const [step, setStep] = useState<'input' | 'otp' | 'loading'>('input');
   const [otp, setOtp] = useState('');
   const [error, setError] = useState('');
@@ -71,7 +72,7 @@ export default function TrackingPage() {
       const otpResponse = await fetch('/api/otp/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: normalizedMobile, vertical })
+        body: JSON.stringify({ phone: normalizedMobile, channel, vertical })
       });
 
       const otpData = await otpResponse.json();
@@ -131,11 +132,15 @@ export default function TrackingPage() {
     if (resendTimer > 0) return;
 
     try {
-      await fetch('/api/otp/resend', {
+      const resendResponse = await fetch('/api/otp/resend', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: mobile })
+        body: JSON.stringify({ token: otpToken })
       });
+      const resendData = await resendResponse.json().catch(() => null);
+      if (resendData?.token) {
+        setOtpToken(resendData.token);
+      }
       setResendTimer(60);
       setError('');
     } catch (err) {
@@ -202,6 +207,32 @@ export default function TrackingPage() {
                   required
                   helperText={t('Enter the mobile number used during application', 'आवेदन के दौरान उपयोग किया गया मोबाइल नंबर दर्ज करें')}
                 />
+
+                <div>
+                  <p className="text-sm font-medium mb-2 text-gray-700">{t('Send OTP via', 'OTP कैसे भेजें')}</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setChannel('sms')}
+                      className={cn(
+                        'py-2.5 px-4 rounded-lg border-2 text-sm font-medium transition-all',
+                        channel === 'sms' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-300 text-gray-600 hover:border-gray-400'
+                      )}
+                    >
+                      {t('SMS', 'एसएमएस')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setChannel('whatsapp')}
+                      className={cn(
+                        'py-2.5 px-4 rounded-lg border-2 text-sm font-medium transition-all',
+                        channel === 'whatsapp' ? 'border-green-500 bg-green-50 text-green-700' : 'border-gray-300 text-gray-600 hover:border-gray-400'
+                      )}
+                    >
+                      {t('WhatsApp', 'व्हाट्सएप')}
+                    </button>
+                  </div>
+                </div>
 
                 {error && (
                   <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md">

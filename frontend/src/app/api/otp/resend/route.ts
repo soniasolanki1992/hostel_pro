@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { resendOtp } from '@/lib/msg91';
 import { sendEmail } from '@/lib/mailer';
+import { sendWhatsappOtp } from '@/lib/twilio-whatsapp';
 import { createSignedSessionToken, verifySignedSessionToken } from '@/lib/auth';
 import { checkRateLimit, getClientIp } from '@/lib/rate-limit';
 import { buildOtpEmail } from '@/lib/otp-email';
@@ -85,26 +86,38 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Email OTP path: generate a fresh code, send via SMTP, embed hashed OTP in a new signed token.
-    if (tokenData.channel === 'email') {
+    // Self-generated channels (email, WhatsApp): regenerate the code, deliver via
+    // the channel's transport, and embed the fresh hash in a new signed token.
+    if (tokenData.channel === 'email' || tokenData.channel === 'whatsapp') {
       const otp = String(crypto.randomInt(100000, 1000000));
       const otpHash = await bcrypt.hash(otp, 10);
 
-      const { subject, html, text } = buildOtpEmail(otp, vertical);
-      const mailResult = await sendEmail({ to: contact, subject, html, text });
+      if (tokenData.channel === 'whatsapp') {
+        const waResult = await sendWhatsappOtp(contact, otp, vertical);
+        if (!waResult.success) {
+          logger.error('OTP resend failed via WhatsApp', { contact, error: waResult.error });
+          return NextResponse.json(
+            { message: 'Failed to resend WhatsApp OTP. Please try again.' },
+            { status: 500 }
+          );
+        }
+      } else {
+        const { subject, html, text } = buildOtpEmail(otp, vertical);
+        const mailResult = await sendEmail({ to: contact, subject, html, text });
 
-      if (!mailResult.success) {
-        logger.error('OTP resend failed via SMTP', { contact, error: mailResult.error });
-        return NextResponse.json(
-          { message: 'Failed to resend OTP email. Please try again.' },
-          { status: 500 }
-        );
+        if (!mailResult.success) {
+          logger.error('OTP resend failed via SMTP', { contact, error: mailResult.error });
+          return NextResponse.json(
+            { message: 'Failed to resend OTP email. Please try again.' },
+            { status: 500 }
+          );
+        }
       }
 
       const newToken = createSignedSessionToken({
         contact,
         vertical,
-        channel: 'email',
+        channel: tokenData.channel,
         otpHash,
       }, 300); // 5 min expiry
 

@@ -18,6 +18,7 @@ import { LanguageToggle } from '@/components/LanguageToggle';
 export default function ParentLoginPage() {
   const { t } = useLanguage();
   const [mobile, setMobile] = useState('');
+  const [channel, setChannel] = useState<'sms' | 'whatsapp'>('sms');
   const [step, setStep] = useState<'input' | 'otp' | 'loading'>('input');
   const [otp, setOtp] = useState('');
   const [error, setError] = useState('');
@@ -51,7 +52,7 @@ export default function ParentLoginPage() {
       const response = await fetch('/api/otp/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: mobile, vertical: 'parent' })
+        body: JSON.stringify({ phone: mobile, channel, vertical: 'parent' })
       });
 
       if (response.ok) {
@@ -121,7 +122,7 @@ export default function ParentLoginPage() {
       const response = await fetch('/api/otp/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: mobile, vertical: 'parent' })
+        body: JSON.stringify({ phone: mobile, channel, vertical: 'parent' })
       });
 
       if (response.ok) {
@@ -194,6 +195,32 @@ export default function ParentLoginPage() {
                   helperText={t("Enter the mobile number registered with your ward's hostel application", 'अपने वार्ड के छात्रावास आवेदन में पंजीकृत मोबाइल नंबर दर्ज करें')}
                   autoFocus
                 />
+
+                <div>
+                  <p className="text-sm font-medium mb-2 text-gray-700">{t('Send OTP via', 'OTP कैसे भेजें')}</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setChannel('sms')}
+                      className={cn(
+                        'py-2.5 px-4 rounded-lg border-2 text-sm font-medium transition-all',
+                        channel === 'sms' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-300 text-gray-600 hover:border-gray-400'
+                      )}
+                    >
+                      {t('SMS', 'एसएमएस')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setChannel('whatsapp')}
+                      className={cn(
+                        'py-2.5 px-4 rounded-lg border-2 text-sm font-medium transition-all',
+                        channel === 'whatsapp' ? 'border-green-500 bg-green-50 text-green-700' : 'border-gray-300 text-gray-600 hover:border-gray-400'
+                      )}
+                    >
+                      {t('WhatsApp', 'व्हाट्सएप')}
+                    </button>
+                  </div>
+                </div>
 
                 {error && (
                   <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md">
