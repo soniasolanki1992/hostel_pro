@@ -13,7 +13,9 @@
     "test:coverage": "vitest --coverage",
     "migrate": "node scripts/migrate.js",
     "migrate:status": "node scripts/migrate.js --status",
-    "migrate:only": "node scripts/migrate.js --only=005_alumni_schema.sql"
+    "migrate:only": "node scripts/migrate.js --only=005_alumni_schema.sql",
+    "import-data:template": "node scripts/import-data.js --make-template",
+    "import-data": "node scripts/import-data.js"
   },
   "dependencies": {
     "@radix-ui/react-accordion": "^1.2.12",
@@ -52,6 +54,7 @@
     "clsx": "^2.1.1",
     "eslint": "^9",
     "eslint-config-next": "16.1.0",
+    "exceljs": "^4.4.0",
     "happy-dom": "^20.0.11",
     "jsdom": "^27.4.0",
     "tailwind-merge": "^3.4.0",
