@@ -69,14 +69,19 @@
  * ---------------------------------------------------------------------------
  *
  * Usage:
- *   node scripts/import-data.js "some-file.xlsx" --client-format --vertical=BOYS_HOSTEL [--dry-run]
+ *   node scripts/import-data.js "Boys Hostel.xlsx" --client-format \
+ *     --vertical=BOYS_HOSTEL --academic-session=2026-2027 [--dry-run]
  *
  * This is a SEPARATE mode from the Rooms/Students template above, for
- * importing a real client-supplied register (e.g. "WhatsApp 2025-26.xlsx")
- * without hand-reformatting it first. It expects a specific known layout —
- * one or more term-period sheets (processed in CLIENT_FORMAT_SHEET_ORDER),
- * each with a 19-column header on row 3 (not row 1), matched by fixed
- * column position because a couple of headers repeat ("R. NO" / "R. NO."):
+ * importing a client-supplied admission register as-is (e.g. "Boys
+ * Hostel.xlsx" / "Girls Hostel.xlsx") without hand-reformatting it first.
+ * It expects a specific known layout — every sheet actually present in the
+ * workbook is processed (in workbook order; sheet *names* aren't relied on,
+ * they aren't consistent between files), each with a 25-column header on
+ * row 4 (rows 1-3 are an institution-name banner + merged section labels),
+ * matched by fixed column position because several headers repeat
+ * ("R. NO" / "R. NO.", "NAME"/"MOBILE" three times each for the three
+ * contact blocks):
  *
  *   1 SL NO.  2 ROOM  3 STUDENT NAME  4 FORM  5 TERM  6 COURSE
  *   7 COLLEGE/FIRM NAME  8 N.PLACE  9 MOB NO.
@@ -84,25 +89,46 @@
  *   14 R. NO.  15 KAYAMI                        <- security deposit group
  *   16 WIFI
  *   17 LOCAL GUARDIAN NAME  18 ADDRESS  19 MOBILE
+ *   20 FATHER NAME  21 MOBILE  22 EMAIL
+ *   23 MOTHER NAME  24 MOBILE  25 EMAIL
  *
- * `--vertical` applies uniformly to every row in the file (this register
- * doesn't have a per-row vertical column).
+ * Columns 4, 8 and 9 vary in label text between the Boys/Girls files
+ * ("FORM" vs "ADMISSION\nFORM NO.", "N.PLACE" vs "NATIVE PLACE", "MOB NO."
+ * vs "MOBILE") — CLIENT_FORMAT_EXPECTED_HEADERS accepts either spelling at
+ * those positions (whitespace/newlines normalized first) while still
+ * strictly validating every other column, so a genuinely wrong file still
+ * fails loudly.
+ *
+ * `--vertical` and `--academic-session` apply uniformly to every row in the
+ * file (this register has no per-row vertical or session column, and these
+ * filenames don't carry a year the way "WhatsApp 2025-26.xlsx" once did —
+ * both are required, explicit flags rather than guessed).
  *
  * Column mapping:
- * - ROOM is a real room_number — must already exist (this file has no
- *   Rooms sheet of its own; run the plain Rooms mode first if needed).
+ * - ROOM is a real room_number. Unlike a real hostel constraint, this
+ *   file's ROOM values aren't backed by any Rooms-sheet import — rooms are
+ *   AUTO-CREATED the first time referenced (capacity starts at 1, floor
+ *   defaults to 1 since no floor data exists anywhere) and AUTO-GROWN by 1
+ *   each time another student needs a slot in the same room number, so by
+ *   the end of the run capacity == the real max people ever seen sharing
+ *   that room number. Every creation/growth is logged so it's auditable,
+ *   not silent. `floor: 1` is a known placeholder — correct it later via
+ *   the Rooms admin screen once real floor numbers are known.
  * - STUDENT NAME -> full_name. COURSE/COLLEGE-FIRM-NAME -> academic_info.
  *   N.PLACE -> address.city (only address field this file has).
- * - LOCAL GUARDIAN NAME/MOBILE -> guardian_info.father_name/father_mobile
- *   (NOT the generic guardian_name/guardian_mobile fields — father_mobile
- *   is what the parent portal actually matches on, see
- *   src/app/api/parent/student/route.ts). This is a "local guardian" in
- *   the source data, not necessarily the legal parent — imported this way
- *   on record. Also reused for emergency_contact (relationship: "Local
- *   Guardian"), the only contact info this file has.
+ * - FATHER/MOTHER NAME/MOBILE/EMAIL -> guardian_info.father_... / mother_...
+ *   (real parent contact this time, not a proxy — this is what the parent
+ *   portal matches on, see src/app/api/parent/student/route.ts).
+ * - LOCAL GUARDIAN NAME/MOBILE -> guardian_info.guardian_name/guardian_mobile
+ *   (guardian_relationship: "Local Guardian") and reused for
+ *   emergency_contact — still the most actionable local contact even
+ *   though real parent data now exists separately.
  * - SL NO./FORM/TERM/WIFI/LOCAL GUARDIAN ADDRESS have no structured home in
  *   applications.data — stashed under data.legacy_import for traceability
  *   rather than dropped silently.
+ * - DATE (col 12): a payment date parsed with year < 2000 is a known
+ *   source typo (e.g. "1926" meant "2026") and is auto-corrected +100
+ *   years, logged by row so the correction is visible, not silent.
  *
  * Fee/deposit data IS imported for real (unlike the plain mode, which
  * doesn't touch fees at all), using the canonical fee_head values already
@@ -129,6 +155,8 @@
  *   a real data problem, not a script bug — both rows are skipped and
  *   logged by name so the source file can be corrected and just those
  *   rows re-imported later. Never auto-merged.
+ * - Room capacity is entirely synthetic (derived from this file's own
+ *   occupancy, not a real known limit) — see ROOM mapping above.
  * - Fee/transaction rows are NOT idempotent — re-running the same file
  *   live a second time will create duplicate fee/transaction records (only
  *   the user/application/allocation side is safe to re-run, same as the
@@ -147,13 +175,19 @@ const VERTICALS = ['BOYS_HOSTEL', 'GIRLS_ASHRAM', 'DHARAMSHALA'];
 const TRACKING_PREFIX = { BOYS_HOSTEL: 'BH', GIRLS_ASHRAM: 'GA', DHARAMSHALA: 'DH' };
 
 // --client-format mode constants (see file header for the full explanation).
-const CLIENT_FORMAT_HEADER_ROW = 3;
-const CLIENT_FORMAT_DATA_START_ROW = 4;
-const CLIENT_FORMAT_SHEET_ORDER = ['JUNE-NOV', 'DEC-APR'];
+const CLIENT_FORMAT_HEADER_ROW = 4;
+const CLIENT_FORMAT_DATA_START_ROW = 5;
+// Each entry is either an exact required header string, or an array of
+// acceptable alternatives (for the few columns whose label text differs
+// between the Boys and Girls files). Compared after whitespace/newline
+// normalization.
 const CLIENT_FORMAT_EXPECTED_HEADERS = [
-  'SL NO.', 'ROOM', 'STUDENT NAME', 'FORM', 'TERM', 'COURSE', 'COLLEGE/FIRM NAME',
-  'N.PLACE', 'MOB NO.', 'FEE', 'R. NO', 'DATE', 'UTR NO.', 'R. NO.', 'KAYAMI',
-  'WIFI', 'NAME', 'ADDRESS', 'MOBILE',
+  'SL NO.', 'ROOM', 'STUDENT NAME', ['FORM', 'ADMISSION FORM NO.'], 'TERM', 'COURSE',
+  'COLLEGE/FIRM NAME', ['N.PLACE', 'NATIVE PLACE'], ['MOB NO.', 'MOBILE'],
+  'FEE', 'R. NO', 'DATE', 'UTR NO.', 'R. NO.', 'KAYAMI', 'WIFI',
+  'NAME', 'ADDRESS', 'MOBILE', // local guardian
+  'NAME', 'MOBILE', 'EMAIL',   // father
+  'NAME', 'MOBILE', 'EMAIL',   // mother
 ];
 // Mirrors the relevant codes from src/lib/fees/feeHeads.ts (FEE_HEAD_LABELS /
 // CANONICAL_FEE_HEADS). That file is a TS/ESM module and can't be require()'d
@@ -448,15 +482,22 @@ function validateStudent(row) {
 // mis-map columns.
 function sheetToPositionalRows(sheet) {
   const headerRow = sheet.getRow(CLIENT_FORMAT_HEADER_ROW);
+  // Collapses newlines/runs of whitespace to a single space, e.g. Boys'
+  // "ADMISSION\nFORM NO." -> "ADMISSION FORM NO." for comparison.
+  const normalize = (s) => s.replace(/\s+/g, ' ').trim();
   const cellText = (cell) => {
     const v = cell.value;
     if (v === null || v === undefined) return '';
-    if (typeof v === 'object' && v.text) return String(v.text).trim();
-    return String(v).trim();
+    if (typeof v === 'object' && v.text) return normalize(String(v.text));
+    return normalize(String(v));
   };
   const actual = CLIENT_FORMAT_EXPECTED_HEADERS.map((_, i) => cellText(headerRow.getCell(i + 1)));
   const mismatches = CLIENT_FORMAT_EXPECTED_HEADERS
-    .map((h, i) => (h === actual[i] ? null : `col ${i + 1}: expected "${h}", found "${actual[i]}"`))
+    .map((expected, i) => {
+      const alternatives = Array.isArray(expected) ? expected : [expected];
+      if (alternatives.includes(actual[i])) return null;
+      return `col ${i + 1}: expected "${alternatives.join('" or "')}", found "${actual[i]}"`;
+    })
     .filter(Boolean);
   if (mismatches.length) {
     throw new Error(
@@ -484,6 +525,17 @@ function sheetToPositionalRows(sheet) {
   return rows;
 }
 
+// A parsed payment date before year 2000 is a known source typo (e.g. the
+// Girls file has several "1926" dates that clearly meant "2026") — corrected
+// +100 years rather than treated as fatal. Returns the (possibly corrected)
+// date and whether a correction was applied, so the caller can log it.
+function fixCentury(date) {
+  if (!date || date.getFullYear() >= 2000) return { date, corrected: false };
+  const fixed = new Date(date);
+  fixed.setFullYear(fixed.getFullYear() + 100);
+  return { date: fixed, corrected: true };
+}
+
 // `str`/`parseDate` above already work with a numeric column index — they
 // just call row.get(col), and don't care whether col is a name or a number.
 function validateClientRow(row, vertical) {
@@ -495,10 +547,11 @@ function validateClientRow(row, vertical) {
   if (!full_name) errors.push('STUDENT NAME is required');
   if (!mobile || !/^\d{7,15}$/.test(mobile)) errors.push('MOB NO. is required and must be 7-15 digits');
 
-  const term_fee_date = parseDate(row, 12, errors);
+  const parsedDate = parseDate(row, 12, errors);
 
   if (errors.length) return { ok: false, errors };
 
+  const { date: term_fee_date, corrected: dateCorrected } = fixCentury(parsedDate);
   const normalizeDash = (v) => (v === null || v === '-' ? null : v);
   const rawTermFeeAmount = row.get(10);
   const rawKayamiAmount = normalizeDash(str(row, 15));
@@ -512,7 +565,17 @@ function validateClientRow(row, vertical) {
       room_number: str(row, 2) ? String(row.get(2)) : null,
       academic_info: { institution: str(row, 7), course: str(row, 6) },
       address: { city: str(row, 8) },
-      guardian_info: { father_name: str(row, 17), father_mobile: str(row, 19) },
+      guardian_info: {
+        father_name: str(row, 20),
+        father_mobile: str(row, 21),
+        father_email: str(row, 22),
+        mother_name: str(row, 23),
+        mother_mobile: str(row, 24),
+        mother_email: str(row, 25),
+        guardian_name: str(row, 17),
+        guardian_mobile: str(row, 19),
+        guardian_relationship: 'Local Guardian',
+      },
       emergency_contact: { name: str(row, 17), mobile: str(row, 19), relationship: 'Local Guardian' },
       legacy_import: {
         sl_no: row.get(1) ?? null,
@@ -527,6 +590,7 @@ function validateClientRow(row, vertical) {
         amount: rawTermFeeAmount ? Number(rawTermFeeAmount) : 0,
         receipt_number: str(row, 11),
         date: term_fee_date,
+        date_corrected: dateCorrected,
         utr: normalizeDash(str(row, 13)),
       },
       kayami: {
@@ -535,21 +599,6 @@ function validateClientRow(row, vertical) {
       },
     },
   };
-}
-
-// Derives "2025-2026" from a filename containing "2025-26" (matches the
-// existing app convention used by FeeStructureTab.tsx / seed data — NOT the
-// sheet name literally, which wouldn't group correctly in the Accounts UI's
-// session filter). The half-year distinction is preserved in each fee's
-// description text instead.
-function academicSessionFor(filePath, sheetName) {
-  const m = path.basename(filePath).match(/(\d{4})-(\d{2})\b/);
-  if (!m) {
-    throw new Error(`Could not derive academic year from filename "${filePath}" — expected a "YYYY-YY" pattern (e.g. "2025-26")`);
-  }
-  const startYear = Number(m[1]);
-  const endYear = Math.floor(startYear / 100) * 100 + Number(m[2]);
-  return { session: `${startYear}-${endYear}`, halfYearLabel: `${sheetName} ${m[1]}-${m[2]}` };
 }
 
 // ---------------------------------------------------------------------------
@@ -708,12 +757,39 @@ async function importStudents(client, studentRows, dryRun, trackingCache) {
 // --client-format import
 // ---------------------------------------------------------------------------
 
-async function resolveClientRoom(client, roomNumber, vertical) {
-  if (!roomNumber) return { room: null, reason: null };
+// This file's ROOM values aren't backed by real capacity data anywhere, so
+// unlike the plain Rooms/Students mode (where a room must pre-exist and
+// "full" is a hard stop), this resolves a room by auto-creating it on first
+// reference (capacity 1, floor 1 — a known placeholder, see file header) and
+// auto-growing its capacity by 1 whenever it's already at capacity, so the
+// final capacity ends up equal to the real max people ever seen sharing that
+// room number. Every creation/growth is reported via `event` so the caller
+// can log it — nothing here is silent. Always succeeds when roomNumber is
+// given; returns null only when there's no room_number to resolve at all.
+async function resolveOrCreateClientRoom(client, roomNumber, vertical, dryRun) {
+  if (!roomNumber) return null;
   const { rows } = await client.query('SELECT * FROM rooms WHERE room_number = $1 AND vertical = $2', [roomNumber, vertical]);
-  if (rows.length === 0) return { room: null, reason: 'not_found' };
-  if (rows[0].occupied_count >= rows[0].capacity) return { room: null, reason: 'full' };
-  return { room: rows[0], reason: null };
+
+  if (rows.length === 0) {
+    if (dryRun) return { id: null, room_number: roomNumber, vertical, capacity: 1, occupied_count: 0, event: 'created' };
+    const { rows: created } = await client.query(
+      `INSERT INTO rooms (room_number, vertical, floor, capacity, status) VALUES ($1, $2, 1, 1, 'AVAILABLE') RETURNING *`,
+      [roomNumber, vertical]
+    );
+    return { ...created[0], event: 'created' };
+  }
+
+  const room = rows[0];
+  if (room.occupied_count >= room.capacity) {
+    if (dryRun) return { ...room, capacity: room.capacity + 1, event: 'grown' };
+    const { rows: grown } = await client.query(
+      'UPDATE rooms SET capacity = capacity + 1 WHERE id = $1 RETURNING *',
+      [room.id]
+    );
+    return { ...grown[0], event: 'grown' };
+  }
+
+  return { ...room, event: null };
 }
 
 // Same occupancy-update logic as allocations/route.ts.
@@ -774,23 +850,21 @@ async function createFeeWithOptionalPayment(client, opts) {
   return { feeId, paid: !!paidAt };
 }
 
-async function importClientFormat(client, workbook, filePath, vertical, dryRun, trackingCache) {
+async function importClientFormat(client, workbook, vertical, academicSession, dryRun, trackingCache) {
   // mobile -> { studentId, applicationId, firstSeenSheet, firstSeenName, activeAllocationId, activeRoomId, activeRoomNumber }
   const seenMobiles = new Map();
   const result = {
     newStudents: 0, existingSupplemented: 0, roomAllocated: 0, roomTransferred: 0,
+    roomsAutoCreated: 0, roomsCapacityGrown: 0,
     termFeesCreated: 0, depositFeesCreated: 0, transactionsCreated: 0,
     mobileCollisions: 0, errors: [], notes: [], credentials: [],
   };
 
-  for (const sheetName of CLIENT_FORMAT_SHEET_ORDER) {
-    const sheet = workbook.getWorksheet(sheetName);
-    if (!sheet) {
-      result.notes.push(`Sheet "${sheetName}" not found in workbook — skipped`);
-      continue;
-    }
+  // Every sheet actually present is processed, in workbook order — sheet
+  // *names* aren't relied on (they aren't consistent between files).
+  for (const sheet of workbook.worksheets) {
+    const sheetName = sheet.name;
     const rows = sheetToPositionalRows(sheet); // throws on header mismatch — aborts the whole run, on purpose
-    const { session, halfYearLabel } = academicSessionFor(filePath, sheetName);
 
     for (const row of rows) {
       const v = validateClientRow(row, vertical);
@@ -800,6 +874,9 @@ async function importClientFormat(client, workbook, filePath, vertical, dryRun, 
       }
       const d = v.data;
       d.legacy_import.source_sheet = sheetName;
+      if (d.term_fee.date_corrected) {
+        result.notes.push(`${sheetName} row ${row.rowNumber}: payment date year corrected +100 (source had a clear typo)`);
+      }
 
       let entry = seenMobiles.get(d.mobile);
       if (!entry) {
@@ -840,13 +917,13 @@ async function importClientFormat(client, workbook, filePath, vertical, dryRun, 
 
       if (!entry) {
         // --- New student ---
-        const { room, reason } = await resolveClientRoom(client, d.room_number, vertical);
-        if (d.room_number && !room) {
-          result.errors.push(
-            `${sheetName} row ${row.rowNumber}: room_number "${d.room_number}" ${reason === 'full' ? 'is already full' : 'not found'} ` +
-            `in vertical ${vertical} — student not created`
-          );
-          continue;
+        const room = await resolveOrCreateClientRoom(client, d.room_number, vertical, dryRun);
+        if (room?.event === 'created') {
+          result.roomsAutoCreated++;
+          result.notes.push(`${sheetName} row ${row.rowNumber}: room "${d.room_number}" auto-created (capacity 1, floor 1 placeholder)`);
+        } else if (room?.event === 'grown') {
+          result.roomsCapacityGrown++;
+          result.notes.push(`${sheetName} row ${row.rowNumber}: room "${d.room_number}" capacity grown to ${room.capacity}`);
         }
 
         const tempPassword = genTempPassword();
@@ -913,12 +990,15 @@ async function importClientFormat(client, workbook, filePath, vertical, dryRun, 
         result.notes.push(`${sheetName} row ${row.rowNumber}: existing student "${d.full_name}" (${d.mobile}) — added fee record`);
 
         if (d.room_number && d.room_number !== entry.activeRoomNumber) {
-          const { room: newRoom, reason } = await resolveClientRoom(client, d.room_number, vertical);
-          if (!newRoom) {
-            result.notes.push(
-              `${sheetName} row ${row.rowNumber}: room change to "${d.room_number}" skipped (${reason === 'full' ? 'full' : 'not found'}) — kept existing allocation`
-            );
-          } else if (!dryRun) {
+          const newRoom = await resolveOrCreateClientRoom(client, d.room_number, vertical, dryRun);
+          if (newRoom.event === 'created') {
+            result.roomsAutoCreated++;
+            result.notes.push(`${sheetName} row ${row.rowNumber}: room "${d.room_number}" auto-created (capacity 1, floor 1 placeholder)`);
+          } else if (newRoom.event === 'grown') {
+            result.roomsCapacityGrown++;
+            result.notes.push(`${sheetName} row ${row.rowNumber}: room "${d.room_number}" capacity grown to ${newRoom.capacity}`);
+          }
+          if (!dryRun) {
             if (entry.activeAllocationId && entry.activeRoomId) {
               const { rows: oldRoomRows } = await client.query('SELECT * FROM rooms WHERE id = $1', [entry.activeRoomId]);
               if (oldRoomRows[0]) await vacateRoom(client, entry.activeAllocationId, oldRoomRows[0]);
@@ -934,6 +1014,7 @@ async function importClientFormat(client, workbook, filePath, vertical, dryRun, 
             result.roomTransferred++;
             result.notes.push(`${sheetName} row ${row.rowNumber}: "${d.full_name}" transferred to room ${d.room_number}`);
           } else {
+            entry.activeRoomNumber = newRoom.room_number;
             result.roomTransferred++;
           }
         }
@@ -957,8 +1038,8 @@ async function importClientFormat(client, workbook, filePath, vertical, dryRun, 
         }
         const outcome = await createFeeWithOptionalPayment(client, {
           studentId: entry.studentId, applicationId: entry.applicationId,
-          feeHead, amount: d.term_fee.amount, academicSession: session,
-          description: `${CLIENT_FEE_HEAD_LABEL[feeHead]} — ${halfYearLabel} (legacy import)`,
+          feeHead, amount: d.term_fee.amount, academicSession,
+          description: `${CLIENT_FEE_HEAD_LABEL[feeHead]} — ${sheetName} ${academicSession} (legacy import)`,
           receiptNumber: d.term_fee.receipt_number, transactionRef, paidAt: d.term_fee.date, dryRun,
         });
         if (outcome) {
@@ -974,8 +1055,8 @@ async function importClientFormat(client, workbook, filePath, vertical, dryRun, 
         }
         const outcome = await createFeeWithOptionalPayment(client, {
           studentId: entry.studentId, applicationId: entry.applicationId,
-          feeHead: CLIENT_FEE_HEAD.SECURITY_DEPOSIT, amount: d.kayami.amount, academicSession: session,
-          description: `${CLIENT_FEE_HEAD_LABEL.SECURITY_DEPOSIT} — ${halfYearLabel} (legacy import)`,
+          feeHead: CLIENT_FEE_HEAD.SECURITY_DEPOSIT, amount: d.kayami.amount, academicSession,
+          description: `${CLIENT_FEE_HEAD_LABEL.SECURITY_DEPOSIT} — ${sheetName} ${academicSession} (legacy import)`,
           receiptNumber: d.kayami.receipt_number, transactionRef: null, paidAt: depositPaidAt, dryRun,
         });
         if (outcome) {
@@ -1006,10 +1087,12 @@ async function main() {
   const clientFormat = args.includes('--client-format');
   const verticalArg = args.find((a) => a.startsWith('--vertical='));
   const vertical = verticalArg ? verticalArg.split('=')[1] : null;
+  const academicSessionArg = args.find((a) => a.startsWith('--academic-session='));
+  const academicSession = academicSessionArg ? academicSessionArg.split('=')[1] : null;
 
   if (!filePath) {
     console.error('Usage: node scripts/import-data.js <file.xlsx> [--dry-run]');
-    console.error(`       node scripts/import-data.js <file.xlsx> --client-format --vertical=<${VERTICALS.join('|')}> [--dry-run]`);
+    console.error(`       node scripts/import-data.js <file.xlsx> --client-format --vertical=<${VERTICALS.join('|')}> --academic-session=<YYYY-YYYY> [--dry-run]`);
     console.error('       node scripts/import-data.js --make-template');
     process.exitCode = 1;
     return;
@@ -1021,6 +1104,11 @@ async function main() {
   }
   if (clientFormat && (!vertical || !VERTICALS.includes(vertical))) {
     console.error(`--vertical=<${VERTICALS.join('|')}> is required and must be valid when --client-format is set`);
+    process.exitCode = 1;
+    return;
+  }
+  if (clientFormat && (!academicSession || !/^\d{4}-\d{4}$/.test(academicSession))) {
+    console.error('--academic-session=<YYYY-YYYY> is required when --client-format is set (e.g. --academic-session=2026-2027)');
     process.exitCode = 1;
     return;
   }
@@ -1047,7 +1135,7 @@ async function main() {
 
   console.log(dryRun ? '--- DRY RUN: no data will be written ---' : '--- LIVE IMPORT ---');
   if (clientFormat) {
-    console.log(`Client-format mode, vertical=${vertical}\n`);
+    console.log(`Client-format mode, vertical=${vertical}, academic-session=${academicSession}\n`);
   } else {
     console.log(`Found ${roomRows.length} room row(s), ${studentRows.length} student row(s)\n`);
   }
@@ -1066,13 +1154,14 @@ async function main() {
     if (!dryRun) await client.query('BEGIN');
 
     if (clientFormat) {
-      const result = await importClientFormat(client, wb, filePath, vertical, dryRun, new Map());
+      const result = await importClientFormat(client, wb, vertical, academicSession, dryRun, new Map());
 
       if (!dryRun) await client.query('COMMIT');
 
       console.log('Client-format import:');
       console.log(`  new students: ${result.newStudents}, existing supplemented: ${result.existingSupplemented}`);
       console.log(`  room allocated: ${result.roomAllocated}, room transferred: ${result.roomTransferred}`);
+      console.log(`  rooms auto-created: ${result.roomsAutoCreated}, rooms capacity grown: ${result.roomsCapacityGrown}`);
       console.log(`  term fees created: ${result.termFeesCreated}, deposit fees created: ${result.depositFeesCreated}, transactions created: ${result.transactionsCreated}`);
       console.log(`  mobile collisions (skipped): ${result.mobileCollisions}`);
       if (result.notes.length) {
@@ -1141,6 +1230,6 @@ if (require.main === module) {
 
 module.exports = {
   sheetToRows, validateRoom, validateStudent, VERTICALS, TRACKING_PREFIX,
-  sheetToPositionalRows, validateClientRow, academicSessionFor,
+  sheetToPositionalRows, validateClientRow, fixCentury,
   CLIENT_FORMAT_EXPECTED_HEADERS, CLIENT_FEE_HEAD,
 };
