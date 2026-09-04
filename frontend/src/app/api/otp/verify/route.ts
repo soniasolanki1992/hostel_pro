@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
+import bcrypt from 'bcryptjs';
 import { verifyOtp } from '@/lib/msg91';
-import { createSignedSessionToken } from '@/lib/auth';
+import { createSignedSessionToken, verifySignedSessionToken } from '@/lib/auth';
 import { checkRateLimit, getClientIp } from '@/lib/rate-limit';
 import { logger } from '@/lib/logger';
 
@@ -58,27 +59,35 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Decode token to get contact and vertical
-    let tokenData;
-    try {
-      const decoded = Buffer.from(token, 'base64').toString('utf-8');
-      tokenData = JSON.parse(decoded);
-    } catch {
-      return NextResponse.json(
-        { message: 'Invalid token' },
-        { status: 401 }
-      );
+    // Decode token. Email OTPs use signed tokens (HMAC); SMS uses base64 JSON.
+    let tokenData: any = verifySignedSessionToken(token);
+    if (!tokenData) {
+      try {
+        const decoded = Buffer.from(token, 'base64').toString('utf-8');
+        tokenData = JSON.parse(decoded);
+      } catch {
+        return NextResponse.json(
+          { message: 'Invalid or expired token' },
+          { status: 401 }
+        );
+      }
     }
 
-    // Verify OTP via MSG91
     const contact = tokenData.contact;
-    const msg91Result = await verifyOtp(contact, code);
 
-    if (!msg91Result.success) {
-      return NextResponse.json(
-        { message: msg91Result.message || 'Invalid OTP code' },
-        { status: 401 }
-      );
+    if (tokenData.channel === 'email' && tokenData.otpHash) {
+      const ok = await bcrypt.compare(code, tokenData.otpHash as string);
+      if (!ok) {
+        return NextResponse.json({ message: 'Invalid OTP code' }, { status: 401 });
+      }
+    } else {
+      const msg91Result = await verifyOtp(contact, code);
+      if (!msg91Result.success) {
+        return NextResponse.json(
+          { message: msg91Result.message || 'Invalid OTP code' },
+          { status: 401 }
+        );
+      }
     }
 
     // Generate cryptographically signed session token with 30-minute expiry

@@ -467,6 +467,9 @@ export default function SuperintendentConfig() {
         </span>
       </div>
 
+      {/* Admissions open/close */}
+      <AdmissionsStatusCard />
+
       {/* Tabs */}
       <nav className="mx-auto max-w-7xl border-b" style={{ borderColor: 'var(--border-gray-200)' }}>
         <div className="flex gap-8 px-6">
@@ -1153,6 +1156,140 @@ export default function SuperintendentConfig() {
           </div>
         )}
       </Modal>
+    </div>
+  );
+}
+
+type AdmissionsVertical = 'boys-hostel' | 'girls-ashram' | 'dharamshala';
+
+const ADMISSIONS_VERTICAL_LABELS: Record<AdmissionsVertical, string> = {
+  'boys-hostel': 'Boys Hostel',
+  'girls-ashram': 'Girls Ashram',
+  'dharamshala': 'Dharamshala',
+};
+
+const ADMISSIONS_DB_TO_SLUG: Record<string, AdmissionsVertical> = {
+  BOYS_HOSTEL: 'boys-hostel',
+  GIRLS_ASHRAM: 'girls-ashram',
+  DHARAMSHALA: 'dharamshala',
+};
+
+function AdmissionsStatusCard() {
+  const [status, setStatus] = useState<Record<AdmissionsVertical, boolean> | null>(null);
+  const [userVertical, setUserVertical] = useState<AdmissionsVertical | null>(null);
+  const [userRole, setUserRole] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [savingVertical, setSavingVertical] = useState<AdmissionsVertical | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const [statusRes, sessionRes] = await Promise.all([
+          fetch('/api/config/applications-status'),
+          token ? fetch('/api/auth/session', { headers: { Authorization: `Bearer ${token}` } }) : null,
+        ]);
+        const statusData = await statusRes.json();
+        if (!cancelled && statusData?.success) setStatus(statusData.data);
+        if (sessionRes && sessionRes.ok) {
+          const sess = await sessionRes.json();
+          if (!cancelled) {
+            setUserRole(sess.role || null);
+            const slug = sess.vertical ? ADMISSIONS_DB_TO_SLUG[sess.vertical] : null;
+            setUserVertical(slug || null);
+          }
+        }
+      } catch (e: any) {
+        if (!cancelled) setError(e.message || 'Failed to load admissions status');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [token]);
+
+  const toggle = async (vertical: AdmissionsVertical, open: boolean) => {
+    if (!token) {
+      setError('Not authenticated');
+      return;
+    }
+    setSavingVertical(vertical);
+    setError(null);
+    try {
+      const res = await fetch('/api/config/applications-status', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ vertical, open }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data?.success) throw new Error(data?.error || 'Failed to update');
+      setStatus((prev) => ({ ...(prev as any), [vertical]: open }));
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setSavingVertical(null);
+    }
+  };
+
+  const verticals: AdmissionsVertical[] = ['boys-hostel', 'girls-ashram', 'dharamshala'];
+  const isTrustee = userRole === 'TRUSTEE';
+
+  return (
+    <div className="mb-4 p-6 rounded-lg" style={{ background: 'var(--surface-primary)', border: '1px solid var(--border-primary)' }}>
+      <div className="flex items-start justify-between mb-4">
+        <div>
+          <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
+            Admissions Status
+          </h2>
+          <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
+            Open or close the public application form. When closed, the apply page is disabled and new submissions are rejected.
+          </p>
+        </div>
+      </div>
+
+      {loading ? (
+        <Spinner />
+      ) : (
+        <div className="space-y-3">
+          {verticals.map((v) => {
+            const isOpen = status?.[v] ?? true;
+            const canEdit = isTrustee || userVertical === v;
+            return (
+              <div key={v} className="flex items-center justify-between p-3 rounded" style={{ background: 'var(--surface-secondary)' }}>
+                <div>
+                  <p className="font-medium" style={{ color: 'var(--text-primary)' }}>
+                    {ADMISSIONS_VERTICAL_LABELS[v]}
+                  </p>
+                  <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                    {isOpen ? 'Accepting new applications' : 'Closed — applicants cannot submit'}
+                    {!canEdit && ' · Read-only (managed by another superintendent)'}
+                  </p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <Badge variant={isOpen ? 'success' : 'destructive'}>
+                    {isOpen ? 'Open' : 'Closed'}
+                  </Badge>
+                  <Toggle
+                    checked={isOpen}
+                    onChange={(checked) => toggle(v, checked)}
+                    disabled={!canEdit || savingVertical === v}
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {error && (
+        <p className="text-sm mt-3" style={{ color: 'var(--color-red-600)' }}>{error}</p>
+      )}
     </div>
   );
 }

@@ -20,6 +20,22 @@ export async function GET(request: NextRequest) {
     const vertical = searchParams.get('vertical');
     const isActive = searchParams.get('is_active');
 
+    // S-26: enum validation on query-param filters.
+    const ALLOWED_ROLES = ['STUDENT', 'SUPERINTENDENT', 'TRUSTEE', 'ACCOUNTS', 'PARENT', 'ALUMNI'];
+    const ALLOWED_VERTICALS = ['BOYS_HOSTEL', 'GIRLS_ASHRAM', 'DHARAMSHALA'];
+    if (role && !ALLOWED_ROLES.includes(role.toUpperCase())) {
+      return new Response(
+        JSON.stringify({ success: false, error: 'Invalid role filter' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+    if (vertical && !ALLOWED_VERTICALS.includes(vertical.toUpperCase())) {
+      return new Response(
+        JSON.stringify({ success: false, error: 'Invalid vertical filter' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+
     let sql = 'SELECT * FROM users WHERE 1=1';
     const params: any[] = [];
     let paramIndex = 1;
@@ -41,7 +57,12 @@ export async function GET(request: NextRequest) {
       params.push(isActive === 'true');
     }
 
-    sql += ' ORDER BY created_at DESC';
+    const limitParam = parseInt(searchParams.get('limit') || '100', 10);
+    const limit = Math.min(Math.max(limitParam, 1), 500);
+    const offsetParam = parseInt(searchParams.get('offset') || '0', 10);
+    const offset = Math.max(offsetParam, 0);
+    sql += ` ORDER BY created_at DESC LIMIT $${paramIndex++} OFFSET $${paramIndex++}`;
+    params.push(limit, offset);
 
     const { rows: users } = await query(sql, params);
 

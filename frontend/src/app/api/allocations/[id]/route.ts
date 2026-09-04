@@ -69,7 +69,7 @@ export async function PUT(
       return notFoundResponse('Allocation not found');
     }
 
-    // Students can only update their own allocation
+    // Students can only update their own allocation (S-18).
     if (user.role === 'STUDENT' && existingRows[0].student_id !== user.id) {
       return NextResponse.json(
         { success: false, error: 'You can only check in to your own allocation' },
@@ -77,8 +77,11 @@ export async function PUT(
       );
     }
 
-    // Only allow updating specific fields
-    const ALLOWED_FIELDS = ['check_in_confirmed', 'check_in_confirmed_at', 'check_in_inventory', 'status'];
+    // Only allow updating specific fields. Students can only confirm
+    // check-in; status transitions (VACATED, etc.) are staff-only.
+    const STUDENT_ALLOWED_FIELDS = ['check_in_confirmed', 'check_in_confirmed_at', 'check_in_inventory'];
+    const STAFF_ALLOWED_FIELDS = [...STUDENT_ALLOWED_FIELDS, 'status'];
+    const ALLOWED_FIELDS = user.role === 'STUDENT' ? STUDENT_ALLOWED_FIELDS : STAFF_ALLOWED_FIELDS;
     const setClauses: string[] = [];
     const values: any[] = [];
 

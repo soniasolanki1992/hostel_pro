@@ -1,6 +1,6 @@
 -- ============================================================================
 -- Hostel Management Application - Database Schema
--- Target: PostgreSQL 18.3 at 51.68.196.242:5432/hostel_pro
+-- Target: PostgreSQL 18.3 at 51.68.196.242:5432/hostel_pro_new
 -- Generated: 2026-03-31
 -- ============================================================================
 
@@ -13,7 +13,7 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 CREATE TYPE user_role AS ENUM ('STUDENT', 'SUPERINTENDENT', 'TRUSTEE', 'ACCOUNTS', 'PARENT');
 CREATE TYPE vertical_type AS ENUM ('BOYS_HOSTEL', 'GIRLS_ASHRAM', 'DHARAMSHALA');
-CREATE TYPE application_status AS ENUM ('DRAFT', 'SUBMITTED', 'REVIEW', 'INTERVIEW', 'APPROVED', 'REJECTED', 'ARCHIVED');
+CREATE TYPE application_status AS ENUM ('DRAFT', 'SUBMITTED', 'REVIEW', 'TRUSTEE_REVIEW', 'SHORTLISTED', 'INTERVIEW', 'TRUSTEE_FINAL_REVIEW', 'WAITLIST', 'APPROVED', 'REJECTED', 'ARCHIVED');
 CREATE TYPE document_status AS ENUM ('PENDING', 'UPLOADED', 'VERIFIED', 'REJECTED');
 CREATE TYPE interview_mode AS ENUM ('IN_PERSON', 'ZOOM', 'GOOGLE_MEET', 'WHATSAPP_VIDEO', 'PHONE_CALL');
 CREATE TYPE interview_status AS ENUM ('SCHEDULED', 'RESCHEDULED', 'COMPLETED', 'NO_SHOW', 'CANCELLED');
@@ -108,6 +108,7 @@ CREATE TABLE applications (
     approved_at TIMESTAMPTZ,
     rejected_at TIMESTAMPTZ,
     rejection_reason TEXT,
+    waitlisted_at TIMESTAMPTZ,
     payment_status VARCHAR(20),
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()

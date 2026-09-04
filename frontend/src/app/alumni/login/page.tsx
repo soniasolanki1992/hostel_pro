@@ -20,6 +20,7 @@ const AlumniLogin = () => {
   const [email, setEmail] = useState('');
   const [otp, setOtp] = useState('');
   const [otpSent, setOtpSent] = useState(false);
+  const [otpToken, setOtpToken] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
   const handleSendOtp = async () => {
@@ -27,16 +28,31 @@ const AlumniLogin = () => {
       toast.error(t('Please enter your registered email address.', 'कृपया अपना पंजीकृत ईमेल पता दर्ज करें।'));
       return;
     }
-
     setIsLoading(true);
-
-    // Mock OTP sending
-    await new Promise(resolve => setTimeout(resolve, 1000));
-
-    setIsLoading(false);
-    setOtpSent(true);
-
-    toast.success(t('A 6-digit code has been sent to your email. Use 123456 for demo.', '6-अंकीय कोड आपके ईमेल पर भेजा गया है। डेमो के लिए 123456 का उपयोग करें।'));
+    try {
+      const res = await fetch('/api/alumni/otp/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        if (res.status === 403 && data.status === 'PENDING') {
+          toast.info(t('Your application is still under review.', 'आपका आवेदन अभी समीक्षाधीन है।'));
+          router.push('/alumni/pending');
+          return;
+        }
+        toast.error(data.error || t('Failed to send OTP', 'OTP भेजने में विफल'));
+        return;
+      }
+      setOtpToken(data.token);
+      setOtpSent(true);
+      toast.success(t("A 6-digit code has been sent to your email. If you don't see it, please check your Spam/Junk folder.", '6-अंकीय कोड आपके ईमेल पर भेजा गया है। यदि यह न दिखे, तो कृपया अपना स्पैम/जंक फ़ोल्डर जांचें।'));
+    } catch {
+      toast.error(t('Network error', 'नेटवर्क त्रुटि'));
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleVerifyOtp = async () => {
@@ -44,28 +60,28 @@ const AlumniLogin = () => {
       toast.error(t('Please enter the OTP sent to your email.', 'कृपया अपने ईमेल पर भेजा गया OTP दर्ज करें।'));
       return;
     }
-
     setIsLoading(true);
-
-    // Mock OTP verification
-    await new Promise(resolve => setTimeout(resolve, 1000));
-
-    setIsLoading(false);
-
-    // Mock OTP check - use 123456 for demo
-    if (otp === '123456') {
+    try {
+      const res = await fetch('/api/alumni/otp/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: otp, token: otpToken }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        toast.error(data.error || t('Invalid OTP', 'अमान्य OTP'));
+        return;
+      }
+      localStorage.setItem('authToken', data.token);
+      localStorage.setItem('userRole', 'ALUMNI');
+      localStorage.setItem('userId', data.alumniId);
+      localStorage.setItem('alumniId', data.alumniId);
       toast.success(t('Welcome back to the Alumni Network!', 'पूर्व छात्र नेटवर्क में आपका स्वागत है!'));
-
-      // Store mock session
-      localStorage.setItem('alumniSession', JSON.stringify({
-        email,
-        status: 'approved',
-        loggedInAt: new Date().toISOString(),
-      }));
-
-      router.push('/alumni/dashboard');
-    } else {
-      toast.error(t('The OTP you entered is incorrect. Try 123456 for demo.', 'आपने जो OTP दर्ज किया है वह गलत है। डेमो के लिए 123456 आज़माएं।'));
+      router.push(data.redirect || '/alumni/dashboard');
+    } catch {
+      toast.error(t('Network error', 'नेटवर्क त्रुटि'));
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -152,14 +168,6 @@ const AlumniLogin = () => {
             </CardContent>
           </Card>
 
-          {/* Demo Notice */}
-          <Card className="mt-4 bg-secondary/10 border-secondary/30">
-            <CardContent className="pt-4">
-              <p className="text-sm text-center text-muted-foreground">
-                <strong>{t('Demo Mode:', 'डेमो मोड:')}</strong> {t('Use OTP', 'OTP का उपयोग करें')} <code className="bg-muted px-1 rounded">123456</code> {t('to login', 'लॉगिन के लिए')}
-              </p>
-            </CardContent>
-          </Card>
         </div>
       </section>
     </PublicLayout>

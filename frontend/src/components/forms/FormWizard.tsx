@@ -56,6 +56,8 @@ const FormWizard: React.FC<FormWizardProps> = ({
   const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [lastSavedTime, setLastSavedTime] = useState<Date | null>(null);
+  const [showSavedToast, setShowSavedToast] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const CurrentStepComponent = steps[currentStep].component;
 
@@ -116,16 +118,32 @@ const FormWizard: React.FC<FormWizardProps> = ({
   const handleSaveDraft = useCallback(async () => {
     if (onSaveDraft) {
       setSaving(true);
+      setSaveError(null);
       try {
         await onSaveDraft(formData, currentStep);
         setLastSavedTime(new Date());
-      } catch (error) {
+        setShowSavedToast(true);
+      } catch (error: any) {
         console.error('Failed to save draft:', error);
+        setSaveError(error?.message || 'Failed to save draft. Please try again.');
       } finally {
         setSaving(false);
       }
     }
   }, [formData, currentStep, onSaveDraft]);
+
+  useEffect(() => {
+    if (!showSavedToast) return;
+    const timer = setTimeout(() => setShowSavedToast(false), 3500);
+    return () => clearTimeout(timer);
+  }, [showSavedToast]);
+
+  // Scroll to top whenever the step changes (Next/Back/stepper click)
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [currentStep]);
 
   const handleSubmit = useCallback(async () => {
     if (validateCurrentStep()) {
@@ -190,6 +208,18 @@ const FormWizard: React.FC<FormWizardProps> = ({
 
   return (
     <div className={cn('w-full', className)}>
+      {showSavedToast && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed top-4 right-4 z-50 flex items-center gap-2 rounded-lg shadow-lg px-4 py-3 border"
+          style={{ backgroundColor: '#ecfdf5', borderColor: '#10b981', color: '#065f46' }}
+        >
+          <Save className="w-4 h-4" />
+          <span className="text-sm font-medium">Draft saved successfully</span>
+        </div>
+      )}
+
       <Stepper
         steps={stepperSteps}
         currentStep={currentStep}
@@ -238,6 +268,9 @@ const FormWizard: React.FC<FormWizardProps> = ({
           {currentStep === 0 && <div />}
 
           <div className="flex items-center gap-3">
+            {saveError && (
+              <span className="text-sm" style={{ color: '#b91c1c' }}>{saveError}</span>
+            )}
             {onSaveDraft && (
               <Button
                 variant="secondary"

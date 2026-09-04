@@ -37,9 +37,11 @@ const statusConfig: Record<string, { label: string; color: string; description: 
   DRAFT: { label: 'Draft', color: 'gray', description: 'Application is being prepared' },
   SUBMITTED: { label: 'Submitted', color: 'blue', description: 'Application submitted and under initial review' },
   REVIEW: { label: 'Under Review', color: 'yellow', description: 'Application is being reviewed by the superintendent' },
-  INTERVIEW: { label: 'Interview Scheduled', color: 'blue', description: 'An interview has been scheduled for your application' },
   TRUSTEE_REVIEW: { label: 'Trustee Review', color: 'yellow', description: 'Application is under review by the trustee committee' },
-  TRUSTEE_INTERVIEW: { label: 'Trustee Interview', color: 'blue', description: 'A trustee interview has been scheduled' },
+  SHORTLISTED: { label: 'Shortlisted', color: 'blue', description: 'Trustee shortlisted you — awaiting interview scheduling' },
+  INTERVIEW: { label: 'Interview Scheduled', color: 'blue', description: 'An interview has been scheduled for your application' },
+  TRUSTEE_FINAL_REVIEW: { label: 'Trustee Final Review', color: 'yellow', description: 'Awaiting trustee final decision' },
+  WAITLIST: { label: 'Waitlisted', color: 'amber', description: 'Approved by trustee — currently on the waitlist; you will be admitted as soon as a room becomes available' },
   APPROVED: { label: 'Approved', color: 'green', description: 'Application approved — student account created' },
   REJECTED: { label: 'Rejected', color: 'red', description: 'Application has been rejected' },
   WITHDRAWN: { label: 'Withdrawn', color: 'gray', description: 'Application has been withdrawn by applicant' },
@@ -50,10 +52,11 @@ const statusSteps = [
   { status: 'DRAFT', label: 'Draft', order: 1 },
   { status: 'SUBMITTED', label: 'Submitted', order: 2 },
   { status: 'REVIEW', label: 'Under Review', order: 3 },
-  { status: 'INTERVIEW', label: 'Interview', order: 4 },
-  { status: 'TRUSTEE_REVIEW', label: 'Trustee Review', order: 5 },
-  { status: 'TRUSTEE_INTERVIEW', label: 'Trustee Interview', order: 6 },
-  { status: 'APPROVED', label: 'Approved', order: 7 },
+  { status: 'TRUSTEE_REVIEW', label: 'Trustee Review', order: 4 },
+  { status: 'SHORTLISTED', label: 'Shortlisted', order: 5 },
+  { status: 'INTERVIEW', label: 'Interview', order: 6 },
+  { status: 'TRUSTEE_FINAL_REVIEW', label: 'Final Review', order: 7 },
+  { status: 'APPROVED', label: 'Approved', order: 8 },
 ];
 
 // Helper function to get the order of current status in the application flow
@@ -62,11 +65,12 @@ function getCurrentStepOrder(status: string): number {
     'DRAFT': 1,
     'SUBMITTED': 2,
     'REVIEW': 3,
-    'INTERVIEW': 4,
-    'TRUSTEE_REVIEW': 5,
-    'TRUSTEE_INTERVIEW': 6,
-    'APPROVED': 7,
-    'REJECTED': 7,
+    'TRUSTEE_REVIEW': 4,
+    'SHORTLISTED': 5,
+    'INTERVIEW': 6,
+    'TRUSTEE_FINAL_REVIEW': 7,
+    'APPROVED': 8,
+    'REJECTED': 8,
     'WITHDRAWN': 0,
     'ARCHIVED': 0,
   };
@@ -79,6 +83,7 @@ function getStatusColor(color: string | undefined): string {
     'gray': 'bg-gray-100 text-gray-700',
     'blue': 'bg-blue-100 text-blue-700',
     'yellow': 'bg-yellow-100 text-yellow-700',
+    'amber': 'bg-amber-100 text-amber-800',
     'green': 'bg-green-100 text-green-700',
     'red': 'bg-red-100 text-red-700'
   };
@@ -407,14 +412,22 @@ export default function TrackingDetailPage() {
 
           {/* Application Summary */}
           <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h2 className="text-2xl font-bold">Application #{application.tracking_number}</h2>
-                <p className="text-gray-600">{application.vertical.replace('_', ' ')} • {application.type}</p>
+            <div className="flex items-start gap-6 mb-4">
+              <img
+                src={`/api/applications/${application.id || application.tracking_number}/photo`}
+                alt={application.data?.personal_info?.full_name || 'Applicant photo'}
+                className="w-28 h-36 object-cover rounded border border-gray-200 bg-gray-100 flex-shrink-0"
+                onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }}
+              />
+              <div className="flex-1 flex items-start justify-between">
+                <div>
+                  <h2 className="text-2xl font-bold">Application #{application.tracking_number}</h2>
+                  <p className="text-gray-600">{application.vertical.replace('_', ' ')} • {application.type}</p>
+                </div>
+                <span className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(currentStatus?.color)}`}>
+                  {tStatus(currentStatus.label)}
+                </span>
               </div>
-              <span className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(currentStatus?.color)}`}>
-                {tStatus(currentStatus.label)}
-              </span>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">

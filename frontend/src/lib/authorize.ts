@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { extractTokenFromHeader, getUserFromToken } from './auth';
 
-export type UserRole = 'STUDENT' | 'SUPERINTENDENT' | 'TRUSTEE' | 'ACCOUNTS' | 'PARENT';
+export type UserRole = 'STUDENT' | 'SUPERINTENDENT' | 'TRUSTEE' | 'ACCOUNTS' | 'PARENT' | 'ALUMNI';
 
 export interface AuthUser {
   id: string;
@@ -17,12 +17,21 @@ export interface AuthUser {
  * Authenticate the request and return the user.
  * Returns null if auth is not required (public routes).
  * Throws NextResponse if auth fails.
+ *
+ * S-08 (additive): the access token can arrive either via the existing
+ * `Authorization: Bearer …` header (legacy localStorage flow) or via an
+ * `auth_token` HttpOnly cookie (recommended). The cookie path is the
+ * forward-looking secure path; the header path is preserved so existing
+ * dashboard fetches keep working during migration.
  */
 export async function requireAuth(
   request: NextRequest,
   allowedRoles?: UserRole[]
 ): Promise<AuthUser> {
-  const token = extractTokenFromHeader(request.headers.get('authorization'));
+  const token =
+    extractTokenFromHeader(request.headers.get('authorization')) ||
+    request.cookies.get('auth_token')?.value ||
+    null;
 
   if (!token) {
     throw NextResponse.json(
@@ -54,7 +63,10 @@ export async function requireAuth(
  * Does not throw. Useful for routes that work both authenticated and unauthenticated.
  */
 export async function optionalAuth(request: NextRequest): Promise<AuthUser | null> {
-  const token = extractTokenFromHeader(request.headers.get('authorization'));
+  const token =
+    extractTokenFromHeader(request.headers.get('authorization')) ||
+    request.cookies.get('auth_token')?.value ||
+    null;
   if (!token) return null;
 
   const user = await getUserFromToken(token);
@@ -76,11 +88,12 @@ export function canAccessStudent(authUser: AuthUser, studentId: string, studentV
       // Parent access is checked at query level (by mobile match), allow here
       return true;
     case 'SUPERINTENDENT':
-      // Superintendent can only access students in their vertical
-      if (studentVertical && authUser.vertical) {
-        return authUser.vertical === studentVertical;
-      }
-      return true; // If vertical not known, allow (query will filter)
+      // Superintendent can only access students in their vertical (S-15).
+      // If either side's vertical is missing we deny — previously this branch
+      // returned true, allowing cross-vertical access whenever a record had a
+      // null/empty vertical column.
+      if (!authUser.vertical || !studentVertical) return false;
+      return authUser.vertical === studentVertical;
     case 'TRUSTEE':
     case 'ACCOUNTS':
       return true; // Full access

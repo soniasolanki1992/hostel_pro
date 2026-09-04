@@ -30,13 +30,14 @@ export async function POST(request: NextRequest) {
 
     // Fetch the target resident — verify they are a STUDENT and (for superintendents) same vertical
     const vertical = getVerticalFilter(authUser);
-    const verticalClause = vertical ? `AND vertical = '${vertical}'` : '';
+    const verticalClause = vertical ? 'AND vertical = $2' : '';
+    const params = vertical ? [userId, vertical] : [userId];
 
     const { rows } = await query(
       `SELECT id, full_name, email, mobile, role, vertical
        FROM users
        WHERE id = $1 AND role = 'STUDENT' AND is_active = true ${verticalClause}`,
-      [userId]
+      params
     );
 
     if (rows.length === 0) {

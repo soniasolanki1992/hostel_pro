@@ -31,9 +31,10 @@ export async function GET() {
       message: 'Connected to PostgreSQL successfully',
     };
   } catch (error: any) {
+    console.error('Health check: postgres connection error', error);
     checks.checks.postgres_connection = {
       status: 'ERROR',
-      error: error.message,
+      error: 'Database connection failed',
     };
   }
 

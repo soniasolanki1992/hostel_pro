@@ -11,9 +11,10 @@ import type { TableColumn } from '@/components/types';
 import { cn } from '@/components/utils';
 import { Spinner } from '@/components/feedback/Spinner';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { EmergencyInfoModal } from '@/components/EmergencyInfoModal';
 
 // Types
-type ApplicationStatus = 'DRAFT' | 'SUBMITTED' | 'REVIEW' | 'INTERVIEW' | 'TRUSTEE_REVIEW' | 'TRUSTEE_INTERVIEW' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN' | 'ARCHIVED';
+type ApplicationStatus = 'DRAFT' | 'SUBMITTED' | 'REVIEW' | 'TRUSTEE_REVIEW' | 'SHORTLISTED' | 'INTERVIEW' | 'TRUSTEE_FINAL_REVIEW' | 'WAITLIST' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN' | 'ARCHIVED';
 type Vertical = 'BOYS' | 'GIRLS' | 'DHARAMSHALA';
 
 interface ApplicationDocument {
@@ -54,6 +55,7 @@ export default function SuperintendentDashboard() {
   const [selectedVertical, setSelectedVertical] = useState<Vertical | 'ALL'>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedApplication, setSelectedApplication] = useState<Application | null>(null);
+  const [emergencyApp, setEmergencyApp] = useState<Application | null>(null);
 
   // API data state
   const [applications, setApplications] = useState<Application[]>([]);
@@ -104,7 +106,7 @@ export default function SuperintendentDashboard() {
                           app.submittedAt ? new Date(app.submittedAt).toLocaleDateString('en-GB') :
                           app.submitted_at ? new Date(app.submitted_at).toLocaleDateString('en-GB') :
                           new Date().toLocaleDateString('en-GB'),
-          paymentStatus: app.fees?.paymentStatus || app.paymentStatus || 'PENDING',
+          paymentStatus: app.payment_status || app.fees?.paymentStatus || app.paymentStatus || 'PENDING',
           interviewScheduled: app.interview?.scheduled || app.interviewScheduled || !!app.interview_scheduled_at || false,
           interview: {
             scheduleTime: app.interview_scheduled_at || app.data?.interview?.scheduled_at || null,
@@ -278,7 +280,8 @@ export default function SuperintendentDashboard() {
       'NEW': 'SUBMITTED',
       'INTERVIEW': 'INTERVIEW',
       'TRUSTEE_REVIEW': 'TRUSTEE_REVIEW',
-      'TRUSTEE_INTERVIEW': 'TRUSTEE_INTERVIEW',
+      'SHORTLISTED': 'SHORTLISTED',
+      'TRUSTEE_FINAL_REVIEW': 'TRUSTEE_FINAL_REVIEW',
       'APPROVED': 'APPROVED',
       'REJECTED': 'REJECTED',
       'WITHDRAWN': 'WITHDRAWN',
@@ -304,7 +307,7 @@ export default function SuperintendentDashboard() {
     if (selectedStatus === 'ALL') {
       matchesStatus = true;
     } else if (selectedStatus === 'PENDING') {
-      matchesStatus = ['SUBMITTED', 'REVIEW', 'INTERVIEW'].includes(app.status);
+      matchesStatus = ['SUBMITTED', 'REVIEW', 'SHORTLISTED', 'INTERVIEW'].includes(app.status);
     } else {
       matchesStatus = app.status === selectedStatus;
     }
@@ -319,9 +322,11 @@ export default function SuperintendentDashboard() {
       case 'DRAFT': return 'default';
       case 'SUBMITTED':
       case 'REVIEW':
+      case 'SHORTLISTED':
       case 'INTERVIEW': return 'warning';
       case 'TRUSTEE_REVIEW':
-      case 'TRUSTEE_INTERVIEW': return 'info';
+      case 'TRUSTEE_FINAL_REVIEW': return 'info';
+      case 'WAITLIST': return 'warning';
       case 'APPROVED': return 'success';
       case 'REJECTED':
       case 'WITHDRAWN': return 'error';
@@ -335,9 +340,11 @@ export default function SuperintendentDashboard() {
       DRAFT: 'Draft',
       SUBMITTED: 'Submitted',
       REVIEW: 'Under Review',
-      INTERVIEW: 'Interview',
-      TRUSTEE_REVIEW: 'Trustee Review',
-      TRUSTEE_INTERVIEW: 'Trustee Interview',
+      TRUSTEE_REVIEW: 'Awaiting Trustee Review',
+      SHORTLISTED: 'Shortlisted',
+      INTERVIEW: 'Interview Scheduled',
+      TRUSTEE_FINAL_REVIEW: 'Awaiting Trustee Final Review',
+      WAITLIST: 'Waitlisted',
       APPROVED: 'Approved',
       REJECTED: 'Rejected',
       WITHDRAWN: 'Withdrawn',
@@ -449,7 +456,7 @@ export default function SuperintendentDashboard() {
       header: 'Actions',
       render: (_: any, row: Application) => (
         <div className="flex gap-2">
-          {['SUBMITTED', 'REVIEW', 'INTERVIEW'].includes(row.status) ? (
+          {['SUBMITTED', 'REVIEW', 'SHORTLISTED', 'INTERVIEW'].includes(row.status) ? (
             <Button
               variant="primary"
               size="sm"
@@ -466,6 +473,15 @@ export default function SuperintendentDashboard() {
               View Details
             </Button>
           )}
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={(e: any) => { e?.stopPropagation?.(); setEmergencyApp(row); }}
+            style={{ background: '#dc2626', borderColor: '#dc2626' }}
+            aria-label={`Emergency info for ${row.applicantName}`}
+          >
+            🚨 Emergency
+          </Button>
         </div>
       )
     }
@@ -647,33 +663,42 @@ export default function SuperintendentDashboard() {
               <h3 className="text-lg font-semibold mb-4" style={{ color: 'var(--text-primary)' }}>
                 Applicant Information
               </h3>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-sm text-gray-600">Name</label>
-                  <p className="font-medium" style={{ color: 'var(--text-primary)' }}>
-                    {selectedApplication.applicantName}
-                  </p>
-                </div>
-                <div>
-                  <label className="text-sm text-gray-600">Tracking Number</label>
-                  <p className="font-mono font-medium" style={{ color: 'var(--text-primary)' }}>
-                    {selectedApplication.trackingNumber}
-                  </p>
-                </div>
-                <div>
-                  <label className="text-sm text-gray-600">Vertical</label>
-                  <Badge
-                    variant={selectedApplication.vertical === 'BOYS' ? 'success' : selectedApplication.vertical === 'GIRLS' ? 'warning' : 'info'}
-                    size="md"
-                  >
-                    {selectedApplication.vertical}
-                  </Badge>
-                </div>
-                <div>
-                  <label className="text-sm text-gray-600">Application Date</label>
-                  <p className="font-medium" style={{ color: 'var(--text-primary)' }}>
-                    {selectedApplication.applicationDate}
-                  </p>
+              <div className="flex items-start gap-6">
+                <img
+                  src={`/api/applications/${selectedApplication.id}/photo`}
+                  alt={selectedApplication.applicantName}
+                  className="w-28 h-36 object-cover rounded border bg-gray-100 flex-shrink-0"
+                  style={{ borderColor: 'var(--border-primary)' }}
+                  onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }}
+                />
+                <div className="grid grid-cols-2 gap-4 flex-1">
+                  <div>
+                    <label className="text-sm text-gray-600">Name</label>
+                    <p className="font-medium" style={{ color: 'var(--text-primary)' }}>
+                      {selectedApplication.applicantName}
+                    </p>
+                  </div>
+                  <div>
+                    <label className="text-sm text-gray-600">Tracking Number</label>
+                    <p className="font-mono font-medium" style={{ color: 'var(--text-primary)' }}>
+                      {selectedApplication.trackingNumber}
+                    </p>
+                  </div>
+                  <div>
+                    <label className="text-sm text-gray-600">Vertical</label>
+                    <Badge
+                      variant={selectedApplication.vertical === 'BOYS' ? 'success' : selectedApplication.vertical === 'GIRLS' ? 'warning' : 'info'}
+                      size="md"
+                    >
+                      {selectedApplication.vertical}
+                    </Badge>
+                  </div>
+                  <div>
+                    <label className="text-sm text-gray-600">Application Date</label>
+                    <p className="font-medium" style={{ color: 'var(--text-primary)' }}>
+                      {selectedApplication.applicationDate}
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>
@@ -840,67 +865,77 @@ export default function SuperintendentDashboard() {
               </Button>
             </div>
 
-            {/* Action Buttons - only for applications that need review */}
-            {selectedApplication && ['SUBMITTED', 'REVIEW', 'INTERVIEW'].includes(selectedApplication.status) && (
+            {/* Action Buttons - status-driven workflow */}
+            {selectedApplication && ['SUBMITTED', 'REVIEW', 'SHORTLISTED', 'INTERVIEW'].includes(selectedApplication.status) && (
             <div className="flex flex-wrap items-center justify-between gap-3 pt-4 border-t" style={{ borderColor: 'var(--border-gray-200)' }}>
               <div className="flex gap-3 flex-wrap">
-                <Button
-                  variant="primary"
-                  onClick={() => {
-                    setActionModal({
-                      isOpen: true,
-                      type: 'approve',
-                      application: selectedApplication,
-                      remarks: ''
-                    });
-                  }}
-                >
-                  Approve
-                </Button>
-                <Button
-                  variant="destructive"
-                  onClick={() => {
-                    setActionModal({
-                      isOpen: true,
-                      type: 'reject',
-                      application: selectedApplication,
-                      remarks: ''
-                    });
-                  }}
-                >
-                  Reject
-                </Button>
-                <Button
-                  variant="secondary"
-                  onClick={() => {
-                    setActionModal({
-                      isOpen: true,
-                      type: 'forward',
-                      application: selectedApplication,
-                      remarks: ''
-                    });
-                  }}
-                >
-                  Forward to Trustee
-                </Button>
-                {/* Schedule Interview only available when not already in INTERVIEW status */}
-                {selectedApplication.status !== 'INTERVIEW' && (
-                <Button
-                  variant="secondary"
-                  onClick={() => {
-                    setInterviewModal({
-                      isOpen: true,
-                      application: selectedApplication,
-                      mode: 'ONLINE',
-                      date: '',
-                      time: '',
-                      isScheduling: false,
-                      error: null,
-                    });
-                  }}
-                >
-                  Schedule Interview
-                </Button>
+                {/* Pre-trustee: only Approve & Forward */}
+                {(selectedApplication.status === 'SUBMITTED' || selectedApplication.status === 'REVIEW') && (
+                  <Button
+                    variant="primary"
+                    onClick={() => {
+                      setActionModal({
+                        isOpen: true,
+                        type: 'forward',
+                        application: selectedApplication,
+                        remarks: ''
+                      });
+                    }}
+                  >
+                    Approve &amp; Forward to Trustee
+                  </Button>
+                )}
+
+                {/* Trustee shortlisted: schedule interview */}
+                {selectedApplication.status === 'SHORTLISTED' && (
+                  <Button
+                    variant="primary"
+                    onClick={() => {
+                      setInterviewModal({
+                        isOpen: true,
+                        application: selectedApplication,
+                        mode: 'ONLINE',
+                        date: '',
+                        time: '',
+                        isScheduling: false,
+                        error: null,
+                      });
+                    }}
+                  >
+                    Schedule Interview
+                  </Button>
+                )}
+
+                {/* Post-interview: approve or send to trustee for final review */}
+                {selectedApplication.status === 'INTERVIEW' && (
+                  <>
+                    <Button
+                      variant="primary"
+                      onClick={() => {
+                        setActionModal({
+                          isOpen: true,
+                          type: 'approve',
+                          application: selectedApplication,
+                          remarks: ''
+                        });
+                      }}
+                    >
+                      Approve
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      onClick={() => {
+                        setActionModal({
+                          isOpen: true,
+                          type: 'reject',
+                          application: selectedApplication,
+                          remarks: ''
+                        });
+                      }}
+                    >
+                      Reject
+                    </Button>
+                  </>
                 )}
               </div>
               <Button
@@ -914,6 +949,15 @@ export default function SuperintendentDashboard() {
               </Button>
             </div>
             )}
+
+            {/* Read-only banner for in-flight states owned by Trustee */}
+            {selectedApplication && (selectedApplication.status === 'TRUSTEE_REVIEW' || selectedApplication.status === 'TRUSTEE_FINAL_REVIEW') && (
+              <div className="p-3 rounded border bg-blue-50 text-blue-800 text-sm" style={{ borderColor: 'var(--border-gray-200)' }}>
+                {selectedApplication.status === 'TRUSTEE_REVIEW'
+                  ? 'Awaiting Trustee review. You will be able to schedule an interview once the Trustee shortlists this applicant.'
+                  : 'Awaiting Trustee final review of your post-interview rejection.'}
+              </div>
+            )}
           </div>
         )}
       </Modal>
@@ -924,19 +968,20 @@ export default function SuperintendentDashboard() {
         onClose={() => setActionModal({ isOpen: false, type: 'approve', application: null, remarks: '' })}
         title={
           actionModal.type === 'approve' ? 'Approve Application' :
-          actionModal.type === 'reject' ? 'Reject Application' : 'Forward to Trustees'
+          actionModal.type === 'reject' ? 'Reject (Send to Trustee for Final Review)' : 'Approve & Forward to Trustee'
         }
         size="md"
         variant={actionModal.type === 'reject' ? 'destructive' : 'confirmation'}
         onConfirm={async () => {
           if (!actionModal.application) return;
-          
+
           setIsActionLoading(true);
           try {
+            // Sup post-interview reject routes to Trustee for override decision.
             const newStatus = actionModal.type === 'approve' ? 'APPROVED' :
-                              actionModal.type === 'reject' ? 'REJECTED' :
+                              actionModal.type === 'reject' ? 'TRUSTEE_FINAL_REVIEW' :
                               'TRUSTEE_REVIEW';
-            
+
             const token = localStorage.getItem('authToken');
             const response = await fetch(`/api/applications/${actionModal.application.id}`, {
               method: 'PUT',
@@ -952,7 +997,11 @@ export default function SuperintendentDashboard() {
               await fetchApplications();
               setActionModal({ isOpen: false, type: 'approve', application: null, remarks: '' });
               setSelectedApplication(null);
-              alert(`Application ${actionModal.type === 'approve' ? 'approved' : actionModal.type === 'reject' ? 'rejected' : 'forwarded'} successfully`);
+              alert(
+                actionModal.type === 'approve' ? 'Application approved' :
+                actionModal.type === 'reject' ? 'Sent to Trustee for final review' :
+                'Forwarded to Trustee for review'
+              );
             } else {
               alert('Failed to update application status');
             }
@@ -962,7 +1011,7 @@ export default function SuperintendentDashboard() {
             setIsActionLoading(false);
           }
         }}
-        confirmText={actionModal.type === 'approve' ? 'Approve' : actionModal.type === 'reject' ? 'Reject' : 'Forward'}
+        confirmText={actionModal.type === 'approve' ? 'Approve' : actionModal.type === 'reject' ? 'Send to Trustee' : 'Forward'}
         confirmLoading={isActionLoading}
       >
         {actionModal.application && (
@@ -1228,6 +1277,15 @@ export default function SuperintendentDashboard() {
           </div>
         )}
       </Modal>
+
+      {/* Emergency Info Modal */}
+      {emergencyApp && (
+        <EmergencyInfoModal
+          applicationId={emergencyApp.id}
+          studentName={emergencyApp.applicantName}
+          onClose={() => setEmergencyApp(null)}
+        />
+      )}
     </div>
   );
 }

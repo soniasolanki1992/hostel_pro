@@ -6,11 +6,22 @@ services:
       dockerfile: Dockerfile
     ports:
       - "7011:3000"
+    # Secrets (DATABASE_URL, JWT_SECRET, ADMIN_SEED_SECRET) load from
+    # ./frontend/.env via env_file. Do not duplicate them here in plaintext
+    # under `environment:` (S-07) — that file is read into the compose
+    # process and rendered into `docker inspect` output.
     environment:
       - NODE_ENV=production
-      - DATABASE_URL=${DATABASE_URL}
-      - JWT_SECRET=${JWT_SECRET}
-      - ADMIN_SEED_SECRET=${ADMIN_SEED_SECRET}
     env_file:
       - ./frontend/.env
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s

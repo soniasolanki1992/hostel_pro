@@ -1,6 +1,36 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { extractTokenFromHeader, getUserFromToken } from '@/lib/auth';
+import { resolveAndValidatePath } from '@/lib/storage';
+import fs from 'fs/promises';
+import path from 'path';
+
+const PHOTO_MIME_BY_EXT: Record<string, string> = {
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.png': 'image/png',
+  '.webp': 'image/webp',
+};
+
+async function loadApplicantPhotoDataUri(applicationId: string): Promise<string | null> {
+  try {
+    const { rows } = await query(
+      `SELECT file_path, mime_type FROM documents
+        WHERE application_id = $1 AND document_type = 'PHOTOGRAPH'
+        ORDER BY uploaded_at DESC LIMIT 1`,
+      [applicationId],
+    );
+    if (!rows?.[0]?.file_path) return null;
+    const ext = path.extname(rows[0].file_path).toLowerCase();
+    const mime = rows[0].mime_type || PHOTO_MIME_BY_EXT[ext];
+    if (!mime || !mime.startsWith('image/')) return null;
+    const abs = await resolveAndValidatePath(rows[0].file_path);
+    const buf = await fs.readFile(abs);
+    return `data:${mime};base64,${buf.toString('base64')}`;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * GET /api/applications/[id]/pdf
@@ -63,6 +93,8 @@ export async function GET(
     const address = data.address
       ? [data.address.line1, data.address.line2, data.address.city, data.address.state, data.address.pin_code].filter(Boolean).join(', ')
       : 'N/A';
+
+    const photoDataUri = await loadApplicantPhotoDataUri(application.id);
 
     const html = `
 <!DOCTYPE html>
@@ -166,6 +198,12 @@ export async function GET(
 
   <div class="section">
     <div class="section-title">Personal Information</div>
+    ${photoDataUri ? `
+    <div style="float: right; margin: 0 0 10px 15px;">
+      <img src="${photoDataUri}" alt="Applicant photograph"
+           style="width: 110px; height: 140px; object-fit: cover; border: 1px solid #999; background: #f5f5f5;" />
+    </div>
+    ` : ''}
     <div class="row"><div class="label">Full Name</div><div class="value">${fullName}</div></div>
     <div class="row"><div class="label">Date of Birth</div><div class="value">${dob}</div></div>
     <div class="row"><div class="label">Gender</div><div class="value">${gender}</div></div>
@@ -173,6 +211,7 @@ export async function GET(
     <div class="row"><div class="label">Mobile Number</div><div class="value">${mobile}</div></div>
     <div class="row"><div class="label">Email</div><div class="value">${email}</div></div>
     <div class="row"><div class="label">Address</div><div class="value">${address}</div></div>
+    <div style="clear: both;"></div>
   </div>
 
   <div class="section">

@@ -26,13 +26,15 @@ export async function GET(request: NextRequest) {
       DRAFT: 0,
       SUBMITTED: 0,
       REVIEW: 0,
-      INTERVIEW: 0,
       TRUSTEE_REVIEW: 0,
-      TRUSTEE_INTERVIEW: 0,
+      SHORTLISTED: 0,
+      INTERVIEW: 0,
+      TRUSTEE_FINAL_REVIEW: 0,
       APPROVED: 0,
       REJECTED: 0,
       WITHDRAWN: 0,
       ARCHIVED: 0,
+      WAITLIST: 0,
     };
 
     let pendingReview = 0;

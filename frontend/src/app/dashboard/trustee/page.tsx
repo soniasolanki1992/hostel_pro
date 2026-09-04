@@ -6,7 +6,7 @@ import { Button } from '@/components/shadcn/button-extended';
 import { Badge } from '@/components/shadcn/badge-extended';
 import { Spinner } from '@/components/feedback/Spinner';
 import { TrusteeStatsCard } from './_components';
-import { FileText, CalendarDays, BedDouble, Clock, CheckCircle, AlertCircle } from 'lucide-react';
+import { FileText, CalendarDays, BedDouble, Clock, CheckCircle, AlertCircle, GraduationCap } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 
 interface DashboardStats {
@@ -16,6 +16,7 @@ interface DashboardStats {
   approvedThisMonth: number;
   rejectedThisMonth: number;
   totalResidents: number;
+  pendingAlumni: number;
 }
 
 interface RecentActivity {
@@ -38,6 +39,7 @@ export default function TrusteeOverview() {
     approvedThisMonth: 0,
     rejectedThisMonth: 0,
     totalResidents: 0,
+    pendingAlumni: 0,
   });
   const [recentActivities, setRecentActivities] = useState<RecentActivity[]>([]);
 
@@ -62,11 +64,11 @@ export default function TrusteeOverview() {
       const getStatus = (app: any) => app.current_status || app.status || app.currentStatus;
       const pending = applications.filter((app: any) => {
         const s = getStatus(app);
-        return s === 'TRUSTEE_REVIEW' || s === 'TRUSTEE_INTERVIEW';
+        return s === 'TRUSTEE_REVIEW' || s === 'TRUSTEE_FINAL_REVIEW';
       }).length;
 
       const interviewScheduled = applications.filter((app: any) =>
-        getStatus(app) === 'TRUSTEE_INTERVIEW'
+        getStatus(app) === 'INTERVIEW'
       ).length;
 
       const pendingAllocation = applications.filter((app: any) =>
@@ -86,6 +88,21 @@ export default function TrusteeOverview() {
         return getStatus(app) === 'REJECTED' && updatedAt >= thisMonth;
       }).length;
 
+      // Fetch pending alumni applications (non-fatal if it fails)
+      let pendingAlumni = 0;
+      try {
+        const alumniRes = await fetch('/api/alumni/admin/applications?status=PENDING', {
+          headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+        });
+        if (alumniRes.ok) {
+          const alumniJson = await alumniRes.json();
+          const list = alumniJson?.data || [];
+          pendingAlumni = Array.isArray(list) ? list.length : 0;
+        }
+      } catch {
+        // ignore, keep 0
+      }
+
       setStats({
         pendingApplications: pending,
         scheduledInterviews: interviewScheduled,
@@ -93,6 +110,7 @@ export default function TrusteeOverview() {
         approvedThisMonth,
         rejectedThisMonth,
         totalResidents: 0, // Would need allocations API
+        pendingAlumni,
       });
 
       // Create recent activities from latest applications
@@ -104,7 +122,7 @@ export default function TrusteeOverview() {
           description: `Application ${app.tracking_number || app.trackingNumber || app.id} - ${app.applicant_name || app.firstName || 'Applicant'}`,
           timestamp: app.updated_at || app.updatedAt || app.created_at || app.createdAt,
           status: getStatus(app) === 'APPROVED' ? 'completed' as const :
-                  getStatus(app) === 'TRUSTEE_INTERVIEW' ? 'scheduled' as const :
+                  getStatus(app) === 'INTERVIEW' ? 'scheduled' as const :
                   'pending' as const,
         }));
 
@@ -161,7 +179,7 @@ export default function TrusteeOverview() {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <TrusteeStatsCard
           title={t('Pending Applications', 'लंबित आवेदन')}
           value={stats.pendingApplications}
@@ -193,6 +211,14 @@ export default function TrusteeOverview() {
           icon={CheckCircle}
           variant="default"
           onClick={() => router.push('/dashboard/trustee/reports')}
+        />
+        <TrusteeStatsCard
+          title={t('Pending Alumni', 'लंबित पूर्व छात्र')}
+          value={stats.pendingAlumni}
+          subtitle={t('Awaiting verification', 'सत्यापन की प्रतीक्षा')}
+          icon={GraduationCap}
+          variant="warning"
+          onClick={() => router.push('/alumni/admin')}
         />
       </div>
 

@@ -14,7 +14,16 @@ export default function GirlsAshramVerifyPage() {
   const [timeLeft, setTimeLeft] = useState(60);
   const [isVerifying, setIsVerifying] = useState(false);
   const [attempts, setAttempts] = useState(0);
+  const [sentTo, setSentTo] = useState<'mobile' | 'email'>('mobile');
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
+
+  useEffect(() => {
+    try {
+      setSentTo(localStorage.getItem('otp_verified_email') ? 'email' : 'mobile');
+    } catch {
+      /* localStorage unavailable — default to mobile */
+    }
+  }, []);
 
   useEffect(() => {
     if (timeLeft > 0 && !isVerifying) {
@@ -126,6 +135,14 @@ export default function GirlsAshramVerifyPage() {
       });
 
       if (response.ok) {
+        const data = await response.json().catch(() => null);
+        if (data?.sessionToken) {
+          try {
+            localStorage.setItem('applicant_session_token', data.sessionToken);
+          } catch {
+            /* non-fatal */
+          }
+        }
         setTimeout(() => {
           window.location.href = '/apply/girls-ashram/form';
         }, 500);
@@ -154,6 +171,14 @@ export default function GirlsAshramVerifyPage() {
       });
 
       if (response.ok) {
+        const data = await response.json();
+        // The resend issues a NEW token (email tokens embed a fresh OTP hash).
+        // Update the URL so verification uses the new token, not the stale one.
+        if (data.token) {
+          const url = new URL(window.location.href);
+          url.searchParams.set('token', data.token);
+          window.history.replaceState({}, '', url.toString());
+        }
         setTimeLeft(60);
         setOtp(['', '', '', '', '', '']);
         setErrors([]);
@@ -299,7 +324,9 @@ export default function GirlsAshramVerifyPage() {
             <h2 className="text-3xl md:text-4xl font-bold mb-4" style={{ color: "var(--text-primary)" }}>
               {t('Enter OTP Code', 'ओटीपी कोड दर्ज करें')}</h2>
             <p className="text-lg mb-8" style={{ color: "var(--text-secondary)" }}>
-              {t('We have sent a 6-digit One-Time Password to your mobile number', 'हमने आपके मोबाइल नंबर पर 6 अंकों का ओटीपी भेजा है')}</p>
+              {sentTo === 'email'
+                ? t('We have sent a 6-digit One-Time Password to your email address', 'हमने आपके ईमेल पते पर 6 अंकों का ओटीपी भेजा है')
+                : t('We have sent a 6-digit One-Time Password to your mobile number', 'हमने आपके मोबाइल नंबर पर 6 अंकों का ओटीपी भेजा है')}</p>
           </div>
 
           <div className="card p-8 mb-8">
@@ -341,8 +368,13 @@ export default function GirlsAshramVerifyPage() {
 
             <div className="text-center mb-6">
               <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-                <strong>Tip:</strong> Enter the 6-digit code sent to your mobile number. The code is valid for 10 minutes.
+                <strong>Tip:</strong> Enter the 6-digit code sent to your {sentTo === 'email' ? 'email address' : 'mobile number'}. The code is valid for 10 minutes.
               </p>
+              {sentTo === 'email' && (
+                <p className="text-sm mt-2" style={{ color: "var(--text-secondary)" }}>
+                  {t('Note: For OTP please check spam box.', 'नोट: OTP के लिए कृपया स्पैम बॉक्स जांचें।')}
+                </p>
+              )}
             </div>
 
             <div className="flex flex-col sm:flex-row gap-4">
@@ -396,10 +428,10 @@ export default function GirlsAshramVerifyPage() {
               {t('Did not receive the OTP?', 'ओटीपी प्राप्त नहीं हुआ?')}</p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
               <Link
-                href="tel:+91224141235"
+                href="tel:+919769610214"
                 className="text-purple-600 hover:text-purple-800 font-medium"
               >
-                {t('Call Girls Ashram Office: +91 22 2414 1235', 'बालिका आश्रम कार्यालय: +91 22 2414 1235')}</Link>
+                {t('Call Girls Ashram Office: +91 9769610214', 'बालिका आश्रम कार्यालय: +91 9769610214')}</Link>
               <span className="text-sm" style={{ color: "var(--text-secondary)" }}>
                 {t('or', 'या')}</span>
               <button

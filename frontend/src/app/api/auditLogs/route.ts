@@ -17,7 +17,8 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const entityType = searchParams.get('entity_type');
     const action = searchParams.get('action');
-    const limit = parseInt(searchParams.get('limit') || '200');
+    const limitParam = parseInt(searchParams.get('limit') || '200', 10);
+    const limit = Math.min(Math.max(limitParam, 1), 500);
 
     let sql = `
       SELECT al.*,

@@ -8,6 +8,7 @@ import { Badge } from '@/components/shadcn/badge-extended';
 import { IndianRupee as IndianRupeeIcon, CreditCard as CreditCardIcon, FileText as FileTextIcon } from 'lucide-react';
 import { PaymentFlowModal } from '@/components/fees/PaymentFlowModal';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { FEE_HEAD_LABELS, FEE_HEAD_DESCRIPTIONS, compareFeeHeadOrder } from '@/lib/fees/feeHeads';
 
 interface FeeItem {
   id: string;
@@ -17,6 +18,7 @@ interface FeeItem {
   paidAmount: number;
   status: 'PAID' | 'PENDING' | 'FAILED' | 'OVERDUE';
   dueDate: string;
+  feeHead?: string;
 }
 
 interface PaymentSummary {
@@ -113,23 +115,18 @@ export default function StudentFeesPage() {
         // API returns { success: true, data: { data: [...], summary: {...} } }
         const feesData = result.data?.data || result.data || [];
 
-        const feeHeadLabels: Record<string, string> = {
-          'HOSTEL_FEES': 'Hostel Fees',
-          'SECURITY_DEPOSIT': 'Security Deposit',
-          'KEY_DEPOSIT': 'Key Deposit',
-          'MESS_ADVANCE': 'Mess Advance',
-          'PROCESSING_FEE': 'Processing Fee',
-          'RENEWAL_FEE': 'Renewal Fee',
-        };
         const transformedFees: FeeItem[] = (Array.isArray(feesData) ? feesData : []).map((fee: any) => ({
           id: fee.id,
-          name: fee.name || feeHeadLabels[fee.fee_head] || fee.fee_head || 'Fee',
-          description: fee.description || `${feeHeadLabels[fee.fee_head] || fee.fee_head} for current period`,
+          name: fee.name || FEE_HEAD_LABELS[fee.fee_head] || fee.fee_head || 'Fee',
+          description: fee.description || FEE_HEAD_DESCRIPTIONS[fee.fee_head] || `${FEE_HEAD_LABELS[fee.fee_head] || fee.fee_head} for current period`,
           amount: parseFloat(fee.amount) || 0,
           paidAmount: parseFloat(fee.paid_amount) || 0,
           status: fee.status,
           dueDate: fee.due_date,
+          feeHead: fee.fee_head,
         }));
+
+        transformedFees.sort((a, b) => compareFeeHeadOrder(a.feeHead || '', b.feeHead || ''));
 
         setFeeItems(transformedFees);
 

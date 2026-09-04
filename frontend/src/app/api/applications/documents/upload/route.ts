@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { saveFile } from '@/lib/storage';
+import { detectMimeFromBytes, isAcceptedMime } from '@/lib/file-type';
 
 const DOCUMENT_TYPE_MAP: Record<string, string> = {
   'photoFile': 'PHOTOGRAPH',
@@ -10,14 +11,39 @@ const DOCUMENT_TYPE_MAP: Record<string, string> = {
   'marksheet': 'EDUCATION_CERTIFICATE',
   'EDUCATION_CERTIFICATE': 'EDUCATION_CERTIFICATE',
   'recommendationLetter': 'OTHER',
+  'casteCertificate': 'CASTE_CERTIFICATE',
+  'CASTE_CERTIFICATE': 'CASTE_CERTIFICATE',
+  'photoWithParents': 'PHOTO_WITH_PARENTS',
+  'PHOTO_WITH_PARENTS': 'PHOTO_WITH_PARENTS',
+  'photoWithFather': 'PHOTO_WITH_FATHER',
+  'PHOTO_WITH_FATHER': 'PHOTO_WITH_FATHER',
+  'photoWithMother': 'PHOTO_WITH_MOTHER',
+  'PHOTO_WITH_MOTHER': 'PHOTO_WITH_MOTHER',
+  'photoWithGuardian': 'PHOTO_WITH_GUARDIAN',
+  'PHOTO_WITH_GUARDIAN': 'PHOTO_WITH_GUARDIAN',
   'incomeCertificate': 'INCOME_CERTIFICATE',
   'INCOME_CERTIFICATE': 'INCOME_CERTIFICATE',
   'medicalCertificate': 'MEDICAL_CERTIFICATE',
+  'medicalFitnessCertificate': 'MEDICAL_CERTIFICATE',
   'MEDICAL_CERTIFICATE': 'MEDICAL_CERTIFICATE',
   'AADHAAR_CARD': 'AADHAAR_CARD',
   'ANTI_RAGGING': 'ANTI_RAGGING',
   'HOSTEL_RULES': 'HOSTEL_RULES',
   'OTHER': 'OTHER',
+  'bonafideCertificate': 'BONAFIDE_CERTIFICATE',
+  'BONAFIDE_CERTIFICATE': 'BONAFIDE_CERTIFICATE',
+  'caFirmLetter': 'CA_FIRM_LETTER',
+  'CA_FIRM_LETTER': 'CA_FIRM_LETTER',
+  'aadhaarOrVoterId': 'AADHAAR_CARD',
+  'addressProof': 'ADDRESS_PROOF',
+  'ADDRESS_PROOF': 'ADDRESS_PROOF',
+  'marksheets': 'EDUCATION_CERTIFICATE',
+  'feeReceipt': 'FEE_RECEIPT',
+  'FEE_RECEIPT': 'FEE_RECEIPT',
+  'registrationLetter': 'REGISTRATION_LETTER',
+  'REGISTRATION_LETTER': 'REGISTRATION_LETTER',
+  'guardianAadhaar': 'GUARDIAN_AADHAAR',
+  'GUARDIAN_AADHAAR': 'GUARDIAN_AADHAAR',
 };
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
@@ -89,6 +115,15 @@ export async function POST(request: NextRequest) {
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
+    // S-21: server-side magic-byte check to defeat MIME spoofing.
+    const detected = detectMimeFromBytes(buffer);
+    if (!detected || !isAcceptedMime(detected, ALLOWED_MIME_TYPES)) {
+      return NextResponse.json(
+        { success: false, error: 'File contents do not match the declared type' },
+        { status: 400 }
+      );
+    }
+
     const filePath = await saveFile(buffer, 'applications', identifier, file.name);
 
     // Save document record to database
@@ -120,8 +155,7 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error('Error in POST /api/applications/documents/upload:', message, error);
-    return NextResponse.json({ success: false, error: `Failed to upload document: ${message}` }, { status: 500 });
+    console.error('Error in POST /api/applications/documents/upload:', error);
+    return NextResponse.json({ success: false, error: 'Failed to upload document' }, { status: 500 });
   }
 }

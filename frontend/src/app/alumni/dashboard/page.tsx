@@ -9,28 +9,57 @@ import { Button } from '@/components/shadcn/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/shadcn/card';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { toast } from 'sonner';
-import alumniData from '@/data/alumni.json';
-import eventsData from '@/data/events.json';
-import jobsData from '@/data/jobs.json';
+
+interface EventItem { id: string; title: string; date: string; location: string; status: string }
+interface JobItem { id: string; title: string; company: string; location: string; status: string; postedBy: { name: string; batch: string } }
 
 const AlumniDashboard = () => {
   const { t } = useLanguage();
   const router = useRouter();
   const [session, setSession] = useState<{ email: string; status: string } | null>(null);
+  const [counts, setCounts] = useState({ alumni: 0, events: 0, jobs: 0 });
+  const [events, setEvents] = useState<EventItem[]>([]);
+  const [jobs, setJobs] = useState<JobItem[]>([]);
 
   useEffect(() => {
-    // Check for mock session
-    const storedSession = localStorage.getItem('alumniSession');
-    if (storedSession) {
-      setSession(JSON.parse(storedSession));
-    } else {
-      // Redirect to login if no session
+    const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
+    const role = typeof window !== 'undefined' ? localStorage.getItem('userRole') : null;
+    if (!token || role !== 'ALUMNI') {
       router.push('/alumni/login');
+      return;
     }
-  }, [router]);
+    const headers = { Authorization: `Bearer ${token}` };
+    (async () => {
+      try {
+        const [meRes, dirRes, evRes, jbRes] = await Promise.all([
+          fetch('/api/alumni/me', { headers }),
+          fetch('/api/alumni/directory', { headers }),
+          fetch('/api/alumni/events?status=upcoming'),
+          fetch('/api/alumni/jobs'),
+        ]);
+        const me = await meRes.json();
+        if (meRes.ok && me.success) setSession({ email: me.data.email, status: me.data.status });
+        const dir = await dirRes.json();
+        const ev = await evRes.json();
+        const jb = await jbRes.json();
+        setCounts({
+          alumni: dir.success ? dir.data.length : 0,
+          events: ev.success ? ev.data.length : 0,
+          jobs: jb.success ? jb.data.length : 0,
+        });
+        if (ev.success) setEvents(ev.data);
+        if (jb.success) setJobs(jb.data);
+      } catch {
+        toast.error(t('Failed to load dashboard', 'डैशबोर्ड लोड करने में विफल'));
+      }
+    })();
+  }, [router, t]);
 
   const handleLogout = () => {
-    localStorage.removeItem('alumniSession');
+    localStorage.removeItem('authToken');
+    localStorage.removeItem('userRole');
+    localStorage.removeItem('userId');
+    localStorage.removeItem('alumniId');
     toast.success(t('You have been successfully logged out.', 'आप सफलतापूर्वक लॉग आउट हो गए हैं।'));
     router.push('/alumni');
   };
@@ -38,19 +67,19 @@ const AlumniDashboard = () => {
   const stats = [
     {
       label: t('Total Alumni', 'कुल पूर्व छात्र'),
-      value: alumniData.filter(a => a.status === 'approved').length,
+      value: counts.alumni,
       icon: Users,
       color: 'bg-primary/10 text-primary',
     },
     {
       label: t('Upcoming Events', 'आगामी कार्यक्रम'),
-      value: eventsData.filter(e => e.status === 'upcoming').length,
+      value: counts.events,
       icon: Calendar,
       color: 'bg-secondary/10 text-secondary',
     },
     {
       label: t('Active Jobs', 'सक्रिय नौकरियां'),
-      value: jobsData.filter(j => j.status === 'active').length,
+      value: counts.jobs,
       icon: Briefcase,
       color: 'bg-accent/10 text-accent',
     },
@@ -146,8 +175,7 @@ const AlumniDashboard = () => {
                 </Button>
               </CardHeader>
               <CardContent className="space-y-4">
-                {eventsData
-                  .filter(e => e.status === 'upcoming')
+                {events
                   .slice(0, 3)
                   .map((event) => (
                     <div key={event.id} className="flex gap-4 p-3 rounded-lg bg-muted/30">
@@ -175,8 +203,7 @@ const AlumniDashboard = () => {
                 </Button>
               </CardHeader>
               <CardContent className="space-y-4">
-                {jobsData
-                  .filter(j => j.status === 'active')
+                {jobs
                   .slice(0, 3)
                   .map((job) => (
                     <div key={job.id} className="p-3 rounded-lg bg-muted/30">

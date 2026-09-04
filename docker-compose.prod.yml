@@ -4,11 +4,20 @@ services:
     image: ${FRONTEND_IMAGE:-ghcr.io/hostel_pro-frontend:latest}
     ports:
       - "7011:3000"
+    # Secrets load only via env_file (S-07). NODE_ENV is the only
+    # non-secret env we set here.
     environment:
       - NODE_ENV=production
-      - DATABASE_URL=${DATABASE_URL}
-      - JWT_SECRET=${JWT_SECRET}
-      - ADMIN_SEED_SECRET=${ADMIN_SEED_SECRET}
     env_file:
       - .env.prod
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s

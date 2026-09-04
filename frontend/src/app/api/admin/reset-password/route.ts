@@ -5,7 +5,7 @@ import {
   badRequestResponse,
   serverErrorResponse,
 } from '@/lib/api/responses';
-import { hashPassword, validatePasswordStrength } from '@/lib/auth';
+import { hashPassword, validatePasswordStrength, comparePassword } from '@/lib/auth';
 import { requireAuth } from '@/lib/authorize';
 
 /**
@@ -14,17 +14,22 @@ import { requireAuth } from '@/lib/authorize';
  * Reset password for a user by email.
  * Auth: TRUSTEE only (highest authority since ADMIN role was removed)
  *
+ * Step-up auth (S-17): the caller must re-prove their own identity by
+ * supplying their CURRENT password in `actorPassword`. A stolen TRUSTEE
+ * JWT alone cannot reset another user's password.
+ *
  * Request body:
  * {
  *   "email": "user@example.com",
- *   "newPassword": "NewPassword123!"
+ *   "newPassword": "NewPassword123!",
+ *   "actorPassword": "<TRUSTEE's current password>"
  * }
  */
 export async function POST(request: NextRequest) {
   try {
     const authUser = await requireAuth(request, ['TRUSTEE']);
     const body = await request.json();
-    const { email, newPassword } = body;
+    const { email, newPassword, actorPassword } = body;
 
     if (!email) {
       return badRequestResponse('Email is required');
@@ -34,9 +39,26 @@ export async function POST(request: NextRequest) {
       return badRequestResponse('New password is required');
     }
 
+    if (!actorPassword) {
+      return badRequestResponse('Confirm your current password to authorize a reset');
+    }
+
     const passwordError = validatePasswordStrength(newPassword);
     if (passwordError) {
       return badRequestResponse(passwordError);
+    }
+
+    // S-17: verify the TRUSTEE's own password before any UPDATE.
+    const { rows: actorRows } = await query(
+      'SELECT password_hash FROM users WHERE id = $1',
+      [authUser.id],
+    );
+    if (
+      actorRows.length === 0 ||
+      !actorRows[0].password_hash ||
+      !(await comparePassword(actorPassword, actorRows[0].password_hash))
+    ) {
+      return badRequestResponse('Current password is incorrect');
     }
 
     // Find the user in public.users

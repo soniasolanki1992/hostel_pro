@@ -45,7 +45,7 @@ npm run start        # Start production server
 This project uses a **single-tier architecture** with Next.js handling both UI and API:
 - **Frontend pages:** Next.js App Router (`frontend/src/app/`)
 - **API routes:** Next.js API routes (`frontend/src/app/api/`) — direct PostgreSQL queries
-- **Database:** PostgreSQL 18.3 at `51.68.196.242:5432/hostel_pro`
+- **Database:** PostgreSQL 18.3 (host configured via `DATABASE_URL` env var; do not document the production host in this file).
 - **Auth:** Custom JWT + bcrypt + OTP (no Supabase)
 - **Storage:** Local `uploads/` directory (no Supabase Storage)
 - **No separate backend** — NestJS backend was removed, all logic in Next.js API routes

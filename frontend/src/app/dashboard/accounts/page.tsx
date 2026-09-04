@@ -9,11 +9,15 @@ import type { TableColumn } from '@/components/types';
 import { Select, type SelectOption } from '@/components/forms/Select';
 import { cn } from '@/components/utils';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { FeeStructureTab } from '@/components/accounts/FeeStructureTab';
+import { GenerateMonthlyMessModal } from '@/components/accounts/GenerateMonthlyMessModal';
+import { FEE_HEAD_LABELS } from '@/lib/fees/feeHeads';
+import { downloadCsv, downloadXls, isWithinPeriod } from '@/lib/accounts/exportUtils';
 
 type Vertical = 'ALL' | 'BOYS' | 'GIRLS' | 'DHARAMSHALA';
 type Period = 'THIS_MONTH' | 'LAST_MONTH' | 'LAST_3_MONTHS' | 'LAST_6_MONTHS' | 'THIS_YEAR' | 'ALL_TIME';
 type Status = 'ALL' | 'PAID' | 'PENDING' | 'OVERDUE' | 'PARTIAL';
-type FeeComponent = 'ALL' | 'PROCESSING_FEE' | 'HOSTEL_FEES' | 'SECURITY_DEPOSIT' | 'KEY_DEPOSIT' | 'PARTIAL_PAYMENT';
+type FeeComponent = 'ALL' | 'PROCESSING_FEE' | 'HOSTEL_FEES' | 'SECURITY_DEPOSIT' | 'KEY_DEPOSIT' | 'MESS_ADVANCE' | 'MESS_MONTHLY_FEE' | 'PARTIAL_PAYMENT';
 type UserRole = 'ALL' | 'SUPERINTENDENT' | 'ACCOUNTS' | 'TRUSTEE';
 
 interface Receivable {
@@ -24,7 +28,7 @@ interface Receivable {
   amount: number;
   dueDate: string;
   status: 'PAID' | 'PENDING' | 'OVERDUE' | 'PARTIAL';
-  feeComponent: 'PROCESSING_FEE' | 'HOSTEL_FEES' | 'SECURITY_DEPOSIT' | 'KEY_DEPOSIT' | 'PARTIAL_PAYMENT';
+  feeComponent: 'PROCESSING_FEE' | 'HOSTEL_FEES' | 'SECURITY_DEPOSIT' | 'KEY_DEPOSIT' | 'MESS_ADVANCE' | 'MESS_MONTHLY_FEE' | 'PARTIAL_PAYMENT';
   contact: {
     phone: string;
     email: string;
@@ -42,7 +46,8 @@ interface Receivable {
 
 export default function AccountsDashboard() {
   const { t } = useLanguage();
-  const [selectedTab, setSelectedTab] = useState<'overview' | 'receivables' | 'payment-logs' | 'receipts' | 'clearance' | 'data-export'>('overview');
+  const [selectedTab, setSelectedTab] = useState<'overview' | 'receivables' | 'payment-logs' | 'fee-structure' | 'receipts' | 'clearance' | 'data-export'>('overview');
+  const [generateMessOpen, setGenerateMessOpen] = useState(false);
   const [selectedVertical, setSelectedVertical] = useState<Vertical>('ALL');
   const [selectedPeriod, setSelectedPeriod] = useState<Period>('THIS_MONTH');
   const [statusFilter, setStatusFilter] = useState<Status>('ALL');
@@ -51,6 +56,35 @@ export default function AccountsDashboard() {
   const [dateRange, setDateRange] = useState<{ from: string; to: string }>({ from: '', to: '' });
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [currentPage, setCurrentPage] = useState(1);
+  const [paymentLogsPage, setPaymentLogsPage] = useState(1);
+  const [exportPage, setExportPage] = useState(1);
+
+  // View Details modal
+  const [detailsModal, setDetailsModal] = useState<{ open: boolean; row: Receivable | null }>({ open: false, row: null });
+
+  // Reminder modal (single + bulk)
+  const [reminderModal, setReminderModal] = useState<{
+    open: boolean;
+    targetIds: string[];
+    channel: 'SMS' | 'WHATSAPP' | 'EMAIL';
+    message: string;
+    loading: boolean;
+    error: string | null;
+  }>({ open: false, targetIds: [], channel: 'SMS', message: '', loading: false, error: null });
+
+  // Communication logs modal
+  const [commLogsModal, setCommLogsModal] = useState<{
+    open: boolean;
+    receivable: Receivable | null;
+    logs: any[];
+    loading: boolean;
+    error: string | null;
+  }>({ open: false, receivable: null, logs: [], loading: false, error: null });
+
+  // Clearance tab data
+  const [clearanceItems, setClearanceItems] = useState<any[]>([]);
+  const [clearanceLoading, setClearanceLoading] = useState(false);
+  const [clearanceError, setClearanceError] = useState<string | null>(null);
 
   const verticalOptions: SelectOption[] = [
     { value: 'ALL', label: 'All Verticals' },
@@ -70,10 +104,12 @@ export default function AccountsDashboard() {
 
   const feeComponentOptions: SelectOption[] = [
     { value: 'ALL', label: 'All Fee Components' },
-    { value: 'PROCESSING_FEE', label: 'Processing Fee' },
-    { value: 'HOSTEL_FEES', label: 'Hostel Fees' },
-    { value: 'SECURITY_DEPOSIT', label: 'Security Deposit' },
-    { value: 'KEY_DEPOSIT', label: 'Key Deposit' },
+    { value: 'PROCESSING_FEE', label: FEE_HEAD_LABELS.PROCESSING_FEE },
+    { value: 'SECURITY_DEPOSIT', label: FEE_HEAD_LABELS.SECURITY_DEPOSIT },
+    { value: 'HOSTEL_FEES', label: FEE_HEAD_LABELS.HOSTEL_FEES },
+    { value: 'MESS_ADVANCE', label: FEE_HEAD_LABELS.MESS_ADVANCE },
+    { value: 'MESS_MONTHLY_FEE', label: FEE_HEAD_LABELS.MESS_MONTHLY_FEE },
+    { value: 'KEY_DEPOSIT', label: FEE_HEAD_LABELS.KEY_DEPOSIT },
     { value: 'PARTIAL_PAYMENT', label: 'Partial Payment' }
   ];
 
@@ -235,6 +271,164 @@ export default function AccountsDashboard() {
     }
   };
 
+  const fetchClearance = async () => {
+    try {
+      setClearanceLoading(true);
+      const token = localStorage.getItem('authToken');
+      const headers: Record<string, string> = token ? { 'Authorization': `Bearer ${token}` } : {};
+      const params = new URLSearchParams();
+      if (selectedVertical !== 'ALL') params.set('vertical', selectedVertical);
+      const res = await fetch(`/api/clearance-items?${params.toString()}`, { headers });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.message || 'Failed to fetch clearance');
+      setClearanceItems(Array.isArray(json?.data) ? json.data : []);
+      setClearanceError(null);
+    } catch (e: any) {
+      setClearanceError(e?.message || 'Failed to load clearance items');
+    } finally {
+      setClearanceLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (selectedTab === 'clearance') fetchClearance();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTab, selectedVertical]);
+
+  const openReminder = (ids: string[]) => {
+    if (ids.length === 0) return;
+    const first = receivables.find(r => r.id === ids[0]);
+    const defaultMsg = first
+      ? `This is a reminder that your ${first.feeComponent.replace(/_/g, ' ')} of ₹${first.amount.toLocaleString('en-IN')} is due on ${first.dueDate}.`
+      : 'Reminder: a fee payment is due. Please clear it at your earliest convenience.';
+    setReminderModal({ open: true, targetIds: ids, channel: 'SMS', message: defaultMsg, loading: false, error: null });
+  };
+
+  const submitReminder = async () => {
+    setReminderModal(s => ({ ...s, loading: true, error: null }));
+    try {
+      const token = localStorage.getItem('authToken');
+      const targets = reminderModal.targetIds
+        .map(id => receivables.find(r => r.id === id))
+        .filter((r): r is Receivable => !!r);
+      if (targets.length === 0) throw new Error('No valid recipients');
+
+      const channel = reminderModal.channel;
+      const recipients = targets.map(r => {
+        const contact = channel === 'EMAIL' ? r.contact.email : (r.contact.phone || r.contact.parentPhone || '');
+        return { contact };
+      }).filter(r => r.contact);
+      if (recipients.length === 0) throw new Error(`No ${channel} contact available for selected recipients`);
+
+      // One row per recipient — record against each receivable so logs stay scoped
+      let total = 0;
+      for (let i = 0; i < targets.length; i++) {
+        const t = targets[i];
+        const contact = channel === 'EMAIL' ? t.contact.email : (t.contact.phone || t.contact.parentPhone || '');
+        if (!contact) continue;
+        const res = await fetch('/api/communications', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({
+            recipients: [{ contact }],
+            channel,
+            purpose: 'FEE_REMINDER',
+            subject: 'Fee payment reminder',
+            message_body: reminderModal.message,
+            related_entity_type: 'FEE',
+            related_entity_id: t.id,
+          }),
+        });
+        const j = await res.json();
+        if (!res.ok) throw new Error(j?.message || 'Failed to record reminder');
+        total += Array.isArray(j?.data) ? j.data.length : 0;
+      }
+
+      setReminderModal({ open: false, targetIds: [], channel: 'SMS', message: '', loading: false, error: null });
+      setSelectedRows(new Set());
+      alert(`Recorded ${total} reminder(s)`);
+    } catch (e: any) {
+      setReminderModal(s => ({ ...s, loading: false, error: e?.message || 'Failed to send' }));
+    }
+  };
+
+  const openCommLogs = async (receivable: Receivable) => {
+    setCommLogsModal({ open: true, receivable, logs: [], loading: true, error: null });
+    try {
+      const token = localStorage.getItem('authToken');
+      const headers: Record<string, string> = token ? { 'Authorization': `Bearer ${token}` } : {};
+      const res = await fetch(`/api/communications?related_entity_id=${receivable.id}&related_entity_type=FEE&limit=200`, { headers });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j?.message || 'Failed to fetch logs');
+      setCommLogsModal(s => ({ ...s, logs: Array.isArray(j?.data) ? j.data : [], loading: false }));
+    } catch (e: any) {
+      setCommLogsModal(s => ({ ...s, loading: false, error: e?.message || 'Failed to load logs' }));
+    }
+  };
+
+  const exportReceivablesCsv = (rows: Receivable[], filename: string, useXls = false) => {
+    const flat = rows.map(r => ({
+      id: r.id,
+      studentName: r.studentName,
+      studentId: r.studentId,
+      vertical: r.vertical,
+      amount: r.amount,
+      dueDate: r.dueDate,
+      status: r.status,
+      feeComponent: r.feeComponent.replace(/_/g, ' '),
+      phone: r.contact.phone,
+      email: r.contact.email,
+      parentPhone: r.contact.parentPhone || '',
+      createdBy: r.audit.createdByRole,
+      createdAt: r.audit.createdAt.split('T')[0],
+    }));
+    const cols = [
+      { key: 'id' as const, header: 'Voucher No' },
+      { key: 'dueDate' as const, header: 'Voucher Date' },
+      { key: 'status' as const, header: 'Status' },
+      { key: 'studentName' as const, header: 'Party Ledger' },
+      { key: 'studentId' as const, header: 'Student ID' },
+      { key: 'amount' as const, header: 'Amount' },
+      { key: 'feeComponent' as const, header: 'Fee Head' },
+      { key: 'vertical' as const, header: 'Cost Center' },
+      { key: 'phone' as const, header: 'Phone' },
+      { key: 'email' as const, header: 'Email' },
+      { key: 'parentPhone' as const, header: 'Parent Phone' },
+      { key: 'createdBy' as const, header: 'Created By' },
+      { key: 'createdAt' as const, header: 'Created Date' },
+    ];
+    (useXls ? downloadXls : downloadCsv)(flat, cols, filename);
+  };
+
+  const exportPaymentLogsCsv = (rows: any[], filename: string, useXls = false) => {
+    const flat = rows.map(r => ({
+      transactionId: r.transactionId || r.id,
+      studentName: r.studentName || '',
+      studentId: r.studentId || '',
+      amount: r.amount,
+      paymentDate: r.paymentDate ? String(r.paymentDate).split('T')[0] : '',
+      method: r.method || '',
+      status: r.status || '',
+      feeHead: r.feeHead || '',
+      vertical: r.vertical || '',
+    }));
+    const cols = [
+      { key: 'transactionId' as const, header: 'Transaction ID' },
+      { key: 'studentName' as const, header: 'Student Name' },
+      { key: 'studentId' as const, header: 'Student ID' },
+      { key: 'amount' as const, header: 'Amount' },
+      { key: 'paymentDate' as const, header: 'Payment Date' },
+      { key: 'method' as const, header: 'Payment Method' },
+      { key: 'status' as const, header: 'Status' },
+      { key: 'feeHead' as const, header: 'Fee Head' },
+      { key: 'vertical' as const, header: 'Vertical' },
+    ];
+    (useXls ? downloadXls : downloadCsv)(flat, cols, filename);
+  };
+
   const filteredReceivables = useMemo(() => {
     return receivables.filter(rec => {
       const matchesVertical = selectedVertical === 'ALL' || rec.vertical === selectedVertical;
@@ -242,16 +436,18 @@ export default function AccountsDashboard() {
       const matchesFeeComponent = feeComponentFilter === 'ALL' || rec.feeComponent === feeComponentFilter;
       const matchesUserRole = userRoleFilter === 'ALL' || rec.audit.createdByRole === userRoleFilter;
       const matchesDateRange = (!dateRange.from || rec.dueDate >= dateRange.from) && (!dateRange.to || rec.dueDate <= dateRange.to);
-      return matchesVertical && matchesStatus && matchesFeeComponent && matchesUserRole && matchesDateRange;
+      const matchesPeriod = isWithinPeriod(rec.dueDate, selectedPeriod);
+      return matchesVertical && matchesStatus && matchesFeeComponent && matchesUserRole && matchesDateRange && matchesPeriod;
     });
-  }, [receivables, selectedVertical, statusFilter, feeComponentFilter, userRoleFilter, dateRange]);
+  }, [receivables, selectedVertical, statusFilter, feeComponentFilter, userRoleFilter, dateRange, selectedPeriod]);
 
   const filteredPaymentLogs = useMemo(() => {
     return paymentLogs.filter(log => {
       const matchesVertical = selectedVertical === 'ALL' || log.vertical === selectedVertical;
-      return matchesVertical;
+      const matchesPeriod = isWithinPeriod(log.paymentDate, selectedPeriod);
+      return matchesVertical && matchesPeriod;
     });
-  }, [paymentLogs, selectedVertical]);
+  }, [paymentLogs, selectedVertical, selectedPeriod]);
 
   const kpis = calculateKPIs();
   const kpiData = [
@@ -332,12 +528,12 @@ export default function AccountsDashboard() {
   };
 
   const handleBulkReminders = () => {
-    alert(`Sending reminders to ${selectedRows.size} recipients`);
-    setSelectedRows(new Set());
+    openReminder(Array.from(selectedRows));
   };
 
   const handleExportSelected = () => {
-    alert(`Exporting ${selectedRows.size} selected records`);
+    const rows = filteredReceivables.filter(r => selectedRows.has(r.id));
+    exportReceivablesCsv(rows, `receivables-selected-${Date.now()}.csv`);
     setSelectedRows(new Set());
   };
 
@@ -440,16 +636,12 @@ export default function AccountsDashboard() {
       header: 'Communication',
       sortable: false,
       render: (_: any, row: Receivable) => (
-        row.communicationLogs && row.communicationLogs > 0 ? (
-          <button
-            className="text-xs text-blue-600 hover:underline"
-            onClick={() => {}}
-          >
-            View ({row.communicationLogs})
-          </button>
-        ) : (
-          <span className="text-xs text-gray-400">No logs</span>
-        )
+        <button
+          className="text-xs text-blue-600 hover:underline"
+          onClick={() => openCommLogs(row)}
+        >
+          {row.communicationLogs && row.communicationLogs > 0 ? `View (${row.communicationLogs})` : 'View logs'}
+        </button>
       )
     },
     {
@@ -468,10 +660,10 @@ export default function AccountsDashboard() {
       header: 'Actions',
       render: (_: any, row: Receivable) => (
         <div className="flex gap-2">
-          <Button variant="primary" size="sm">
+          <Button variant="primary" size="sm" onClick={() => setDetailsModal({ open: true, row })}>
             View Details
           </Button>
-          <Button variant="secondary" size="sm">
+          <Button variant="secondary" size="sm" onClick={() => openReminder([row.id])}>
             Send Reminder
           </Button>
         </div>
@@ -553,10 +745,18 @@ export default function AccountsDashboard() {
       header: 'Actions',
       render: (_: any, row: any) => (
         <div className="flex gap-2">
-          <Button variant="primary" size="sm">
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => exportPaymentLogsCsv([row], `receipt-${row.transactionId || row.id}.csv`)}
+          >
             View Receipt
           </Button>
-          <Button variant="secondary" size="sm">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => exportPaymentLogsCsv([row], `receipt-${row.transactionId || row.id}.xls`, true)}
+          >
             Download
           </Button>
         </div>
@@ -635,6 +835,21 @@ export default function AccountsDashboard() {
                 onClick={() => setSelectedTab('payment-logs')}
               >
                 {t('Payment Logs', 'भुगतान लॉग')}
+              </button>
+              <button
+                className={cn(
+                  'py-4 px-2 border-b-2 font-medium text-sm transition-colors',
+                  selectedTab === 'fee-structure'
+                    ? 'border-navy-900 text-navy-900'
+                    : 'border-transparent text-gray-600 hover:text-gray-900'
+                )}
+                style={{
+                  borderColor: selectedTab === 'fee-structure' ? 'var(--border-primary)' : 'transparent',
+                  color: selectedTab === 'fee-structure' ? 'var(--text-primary)' : 'var(--text-secondary)'
+                }}
+                onClick={() => setSelectedTab('fee-structure')}
+              >
+                {t('Fee Structure', 'शुल्क संरचना')}
               </button>
               <button
                 className={cn(
@@ -732,29 +947,79 @@ export default function AccountsDashboard() {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <div className="lg:col-span-2">
-                <h2 className="text-lg font-semibold mb-4" style={{ color: 'var(--text-primary)' }}>
-                  {t('Recent Receivables', 'हालिया प्राप्य')}
-                </h2>
-                <Button
-                  variant="primary"
-                  size="sm"
-                  onClick={() => setSelectedTab('receivables')}
-                >
-                  {t('View All Receivables', 'सभी प्राप्य देखें')}
-                </Button>
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
+                    {t('Recent Receivables', 'हालिया प्राप्य')}
+                  </h2>
+                  <Button variant="primary" size="sm" onClick={() => setSelectedTab('receivables')}>
+                    {t('View All', 'सभी देखें')}
+                  </Button>
+                </div>
+                <div className="rounded-lg overflow-hidden border" style={{ borderColor: 'var(--border-gray-200)' }}>
+                  <table className="w-full text-sm">
+                    <thead style={{ background: 'var(--surface-primary)' }}>
+                      <tr>
+                        <th className="text-left px-3 py-2 font-medium">Student</th>
+                        <th className="text-left px-3 py-2 font-medium">Fee</th>
+                        <th className="text-right px-3 py-2 font-medium">Amount</th>
+                        <th className="text-left px-3 py-2 font-medium">Due</th>
+                        <th className="text-left px-3 py-2 font-medium">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredReceivables.slice(0, 5).map(rec => (
+                        <tr key={rec.id} className="border-t" style={{ borderColor: 'var(--border-gray-200)' }}>
+                          <td className="px-3 py-2">{rec.studentName}</td>
+                          <td className="px-3 py-2 text-xs">{rec.feeComponent.replace(/_/g, ' ')}</td>
+                          <td className="px-3 py-2 text-right">₹{rec.amount.toLocaleString('en-IN')}</td>
+                          <td className="px-3 py-2 text-xs">{rec.dueDate}</td>
+                          <td className="px-3 py-2"><Badge variant={getStatusVariant(rec.status)} size="sm">{rec.status}</Badge></td>
+                        </tr>
+                      ))}
+                      {filteredReceivables.length === 0 && (
+                        <tr><td colSpan={5} className="px-3 py-6 text-center text-sm text-gray-500">No receivables</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-              <div className="lg:col-span-2">
-                <h2 className="text-lg font-semibold mb-4" style={{ color: 'var(--text-primary)' }}>
-                  {t('Recent Payment Activity', 'हालिया भुगतान गतिविधि')}
-                </h2>
-                <Button
-                  variant="primary"
-                  size="sm"
-                  onClick={() => setSelectedTab('payment-logs')}
-                >
-                  {t('View Payment Logs', 'भुगतान लॉग देखें')}
-                </Button>
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
+                    {t('Recent Payment Activity', 'हालिया भुगतान गतिविधि')}
+                  </h2>
+                  <Button variant="primary" size="sm" onClick={() => setSelectedTab('payment-logs')}>
+                    {t('View All', 'सभी देखें')}
+                  </Button>
+                </div>
+                <div className="rounded-lg overflow-hidden border" style={{ borderColor: 'var(--border-gray-200)' }}>
+                  <table className="w-full text-sm">
+                    <thead style={{ background: 'var(--surface-primary)' }}>
+                      <tr>
+                        <th className="text-left px-3 py-2 font-medium">Student</th>
+                        <th className="text-left px-3 py-2 font-medium">Method</th>
+                        <th className="text-right px-3 py-2 font-medium">Amount</th>
+                        <th className="text-left px-3 py-2 font-medium">Date</th>
+                        <th className="text-left px-3 py-2 font-medium">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredPaymentLogs.slice(0, 5).map((log: any) => (
+                        <tr key={log.id} className="border-t" style={{ borderColor: 'var(--border-gray-200)' }}>
+                          <td className="px-3 py-2">{log.studentName || '—'}</td>
+                          <td className="px-3 py-2 text-xs">{log.method || '—'}</td>
+                          <td className="px-3 py-2 text-right">₹{Number(log.amount || 0).toLocaleString('en-IN')}</td>
+                          <td className="px-3 py-2 text-xs">{log.paymentDate ? String(log.paymentDate).split('T')[0] : '—'}</td>
+                          <td className="px-3 py-2"><Badge variant={log.status === 'SUCCESS' ? 'success' : 'error'} size="sm">{log.status || '—'}</Badge></td>
+                        </tr>
+                      ))}
+                      {filteredPaymentLogs.length === 0 && (
+                        <tr><td colSpan={5} className="px-3 py-6 text-center text-sm text-gray-500">No payments</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           </>
@@ -857,6 +1122,14 @@ export default function AccountsDashboard() {
                 >
                   Clear Filters
                 </Button>
+
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => setGenerateMessOpen(true)}
+                >
+                  Generate Monthly Mess Fees
+                </Button>
               </div>
             </div>
 
@@ -932,7 +1205,7 @@ export default function AccountsDashboard() {
                 <Button
                   variant="secondary"
                   size="sm"
-                  onClick={() => {}}
+                  onClick={() => exportPaymentLogsCsv(filteredPaymentLogs, `payment-logs-${Date.now()}.csv`)}
                 >
                   Export Logs
                 </Button>
@@ -949,14 +1222,14 @@ export default function AccountsDashboard() {
             </div>
 
             <Table<any>
-              data={filteredPaymentLogs}
+              data={filteredPaymentLogs.slice((paymentLogsPage - 1) * 20, paymentLogsPage * 20)}
               columns={paymentLogColumns}
               pagination={{
-                currentPage: 1,
+                currentPage: paymentLogsPage,
                 pageSize: 20,
                 totalItems: filteredPaymentLogs.length,
-                totalPages: Math.ceil(filteredPaymentLogs.length / 20),
-                onPageChange: () => {}
+                totalPages: Math.max(1, Math.ceil(filteredPaymentLogs.length / 20)),
+                onPageChange: setPaymentLogsPage
               }}
               density="compact"
               striped={true}
@@ -966,10 +1239,149 @@ export default function AccountsDashboard() {
           </>
         )}
 
-        {selectedTab === 'receipts' && (
-          <div className="p-12 text-center rounded-lg" style={{ background: 'var(--surface-primary)' }}>
-            <p className="text-sm text-gray-600">Receipt management module coming soon...</p>
-          </div>
+        {selectedTab === 'fee-structure' && (
+          <FeeStructureTab />
+        )}
+
+        {selectedTab === 'receipts' && (() => {
+          const receipts = filteredPaymentLogs.filter((l: any) => l.status === 'SUCCESS');
+          return (
+            <>
+              <div className="mb-6 p-4 rounded-lg" style={{ background: 'var(--surface-primary)' }}>
+                <div className="flex flex-wrap items-center gap-4">
+                  <label className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>Vertical:</label>
+                  <Select
+                    options={verticalOptions}
+                    value={selectedVertical}
+                    onChange={(e) => setSelectedVertical(e.target.value as Vertical)}
+                    size="sm"
+                  />
+                  <label className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>Period:</label>
+                  <Select
+                    options={periodOptions}
+                    value={selectedPeriod}
+                    onChange={(e) => setSelectedPeriod(e.target.value as Period)}
+                    size="sm"
+                  />
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={() => exportPaymentLogsCsv(receipts, `receipts-${Date.now()}.csv`)}
+                  >
+                    Export Receipts
+                  </Button>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>Issued Receipts</h2>
+                <p className="text-sm text-gray-600">{receipts.length} receipt(s)</p>
+              </div>
+
+              <Table<any>
+                data={receipts}
+                columns={[
+                  { key: 'transactionId', header: 'Receipt / Txn', sortable: true, render: (v: string) => <span className="font-mono text-xs">{v}</span> },
+                  { key: 'studentName', header: 'Student', sortable: true },
+                  { key: 'studentId', header: 'Student ID', sortable: true, render: (v: string) => <span className="font-mono text-xs">{v}</span> },
+                  { key: 'amount', header: 'Amount (₹)', sortable: true, render: (v: number) => `₹${Number(v).toLocaleString('en-IN')}` },
+                  { key: 'paymentDate', header: 'Date', sortable: true, render: (v: string) => v ? String(v).split('T')[0] : '—' },
+                  { key: 'method', header: 'Method', sortable: true },
+                  { key: 'feeHead', header: 'Fee Head', sortable: true },
+                  { key: 'vertical', header: 'Vertical', sortable: true },
+                  {
+                    key: 'actions',
+                    header: 'Actions',
+                    render: (_: any, row: any) => (
+                      <div className="flex gap-2">
+                        <Button variant="primary" size="sm" onClick={() => exportPaymentLogsCsv([row], `receipt-${row.transactionId || row.id}.csv`)}>
+                          CSV
+                        </Button>
+                        <Button variant="secondary" size="sm" onClick={() => exportPaymentLogsCsv([row], `receipt-${row.transactionId || row.id}.xls`, true)}>
+                          XLS
+                        </Button>
+                      </div>
+                    )
+                  }
+                ]}
+                pagination={{
+                  currentPage: 1,
+                  pageSize: 20,
+                  totalItems: receipts.length,
+                  totalPages: Math.max(1, Math.ceil(receipts.length / 20)),
+                  onPageChange: () => {}
+                }}
+                density="compact"
+                striped={true}
+                stickyHeader={true}
+                emptyMessage="No receipts found for current filters"
+              />
+            </>
+          );
+        })()}
+
+        {selectedTab === 'clearance' && (
+          <>
+            <div className="mb-6 p-4 rounded-lg" style={{ background: 'var(--surface-primary)' }}>
+              <div className="flex flex-wrap items-center gap-4">
+                <label className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>Vertical:</label>
+                <Select
+                  options={verticalOptions}
+                  value={selectedVertical}
+                  onChange={(e) => setSelectedVertical(e.target.value as Vertical)}
+                  size="sm"
+                />
+                <Button variant="secondary" size="sm" onClick={fetchClearance}>Refresh</Button>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>Exit Clearance — Outstanding Dues</h2>
+              <p className="text-sm text-gray-600">{clearanceItems.length} request(s)</p>
+            </div>
+
+            {clearanceLoading && <p className="text-sm text-gray-500">Loading…</p>}
+            {clearanceError && <p className="text-sm text-red-600">{clearanceError}</p>}
+
+            {!clearanceLoading && !clearanceError && (
+              <Table<any>
+                data={clearanceItems}
+                columns={[
+                  { key: 'studentName', header: 'Student', sortable: true },
+                  { key: 'studentId', header: 'Student ID', sortable: true, render: (v: string) => <span className="font-mono text-xs">{v}</span> },
+                  { key: 'vertical', header: 'Vertical', sortable: true, render: (v: string) => (
+                    <span className={cn('px-2 py-0.5 rounded text-xs font-medium', getVerticalColor(v))}>{v}</span>
+                  )},
+                  { key: 'roomNumber', header: 'Room', sortable: true },
+                  { key: 'requestedExitDate', header: 'Requested Exit', sortable: true, render: (v: string) => v ? String(v).split('T')[0] : '—' },
+                  { key: 'outstandingAmount', header: 'Outstanding (₹)', sortable: true, render: (v: number) => (
+                    <span className={cn('font-medium', Number(v) > 0 ? 'text-red-600' : 'text-green-600')}>
+                      ₹{Number(v).toLocaleString('en-IN')}
+                    </span>
+                  )},
+                  { key: 'outstandingCount', header: 'Pending Fees', sortable: true },
+                  { key: 'progress', header: 'Clearance', sortable: false, render: (p: any) => (
+                    <span className="text-xs">{p?.completed || 0}/{p?.total || 0} done</span>
+                  )},
+                  { key: 'clearanceStatus', header: 'Status', sortable: true, render: (v: string) => (
+                    <Badge variant={v === 'CLEARED' ? 'success' : 'warning'} size="sm">{v || 'PENDING'}</Badge>
+                  )},
+                  { key: 'agingDays', header: 'Aging', sortable: true, render: (v: number) => `${v}d` },
+                ]}
+                pagination={{
+                  currentPage: 1,
+                  pageSize: 20,
+                  totalItems: clearanceItems.length,
+                  totalPages: Math.max(1, Math.ceil(clearanceItems.length / 20)),
+                  onPageChange: () => {}
+                }}
+                density="compact"
+                striped={true}
+                stickyHeader={true}
+                emptyMessage="No clearance requests"
+              />
+            )}
+          </>
         )}
 
         {selectedTab === 'data-export' && (
@@ -1015,10 +1427,18 @@ export default function AccountsDashboard() {
                   </div>
 
                   <div className="flex gap-2">
-                    <Button variant="primary" size="sm" onClick={() => {}}>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={() => exportReceivablesCsv(filteredReceivables, `tally-export-${Date.now()}.csv`)}
+                    >
                       Download CSV
                     </Button>
-                    <Button variant="secondary" size="sm" onClick={() => {}}>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => exportReceivablesCsv(filteredReceivables, `tally-export-${Date.now()}.xls`, true)}
+                    >
                       Download XLS
                     </Button>
                   </div>
@@ -1035,7 +1455,7 @@ export default function AccountsDashboard() {
               </div>
 
               <Table<any>
-                data={filteredReceivables.map(rec => ({
+                data={filteredReceivables.slice((exportPage - 1) * 20, exportPage * 20).map(rec => ({
                   voucherNo: rec.id,
                   voucherDate: rec.dueDate,
                   voucherType: rec.status === 'PAID' ? 'Receipt' : 'Payment',
@@ -1062,11 +1482,11 @@ export default function AccountsDashboard() {
                   { key: 'createdDate', header: 'Created Date', sortable: true }
                 ]}
                 pagination={{
-                  currentPage: 1,
+                  currentPage: exportPage,
                   pageSize: 20,
                   totalItems: filteredReceivables.length,
-                  totalPages: Math.ceil(filteredReceivables.length / 20),
-                  onPageChange: () => {}
+                  totalPages: Math.max(1, Math.ceil(filteredReceivables.length / 20)),
+                  onPageChange: setExportPage
                 }}
                 density="compact"
                 striped={true}
@@ -1114,6 +1534,12 @@ export default function AccountsDashboard() {
           </>
         )}
       </main>
+
+      <GenerateMonthlyMessModal
+        open={generateMessOpen}
+        onClose={() => setGenerateMessOpen(false)}
+        onGenerated={fetchData}
+      />
 
       {/* Record Manual Payment Modal */}
       {recordPayment.open && (
@@ -1265,6 +1691,148 @@ export default function AccountsDashboard() {
                 Record Payment
               </Button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* View Details Modal */}
+      {detailsModal.open && detailsModal.row && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.5)' }}
+          onClick={() => setDetailsModal({ open: false, row: null })}
+        >
+          <div className="w-full max-w-2xl bg-white rounded-lg shadow-xl p-6 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold">Receivable Details</h2>
+              <button onClick={() => setDetailsModal({ open: false, row: null })} className="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
+            </div>
+            {(() => {
+              const r = detailsModal.row!;
+              return (
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div><div className="text-gray-500 text-xs">Student</div><div className="font-medium">{r.studentName}</div></div>
+                  <div><div className="text-gray-500 text-xs">Student ID</div><div className="font-mono text-xs">{r.studentId}</div></div>
+                  <div><div className="text-gray-500 text-xs">Vertical</div><div>{r.vertical}</div></div>
+                  <div><div className="text-gray-500 text-xs">Status</div><Badge variant={getStatusVariant(r.status)} size="sm">{r.status}</Badge></div>
+                  <div><div className="text-gray-500 text-xs">Fee Component</div><div>{r.feeComponent.replace(/_/g, ' ')}</div></div>
+                  <div><div className="text-gray-500 text-xs">Amount</div><div className="font-medium">₹{r.amount.toLocaleString('en-IN')}</div></div>
+                  <div><div className="text-gray-500 text-xs">Due Date</div><div>{r.dueDate}</div></div>
+                  <div><div className="text-gray-500 text-xs">Phone</div><div>{r.contact.phone || '—'}</div></div>
+                  <div><div className="text-gray-500 text-xs">Email</div><div>{r.contact.email || '—'}</div></div>
+                  <div><div className="text-gray-500 text-xs">Parent Phone</div><div>{r.contact.parentPhone || '—'}</div></div>
+                  <div><div className="text-gray-500 text-xs">Created By</div><div>{r.audit.createdByRole}</div></div>
+                  <div><div className="text-gray-500 text-xs">Created At</div><div>{r.audit.createdAt.split('T')[0]}</div></div>
+                </div>
+              );
+            })()}
+            <div className="flex gap-3 justify-end pt-4 mt-4 border-t" style={{ borderColor: 'var(--border-primary)' }}>
+              <Button variant="secondary" size="sm" onClick={() => { const row = detailsModal.row!; setDetailsModal({ open: false, row: null }); openCommLogs(row); }}>
+                View Communications
+              </Button>
+              <Button variant="primary" size="sm" onClick={() => { const id = detailsModal.row!.id; setDetailsModal({ open: false, row: null }); openReminder([id]); }}>
+                Send Reminder
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reminder Modal */}
+      {reminderModal.open && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.5)' }}
+          onClick={() => !reminderModal.loading && setReminderModal(s => ({ ...s, open: false }))}
+        >
+          <div className="w-full max-w-lg bg-white rounded-lg shadow-xl p-6 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold">
+                Send Reminder ({reminderModal.targetIds.length} recipient{reminderModal.targetIds.length !== 1 ? 's' : ''})
+              </h2>
+              <button onClick={() => !reminderModal.loading && setReminderModal(s => ({ ...s, open: false }))} className="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Channel</label>
+                <select
+                  value={reminderModal.channel}
+                  onChange={e => setReminderModal(s => ({ ...s, channel: e.target.value as 'SMS' | 'WHATSAPP' | 'EMAIL' }))}
+                  className="w-full px-3 py-2 rounded border border-gray-300 text-sm"
+                >
+                  <option value="SMS">SMS</option>
+                  <option value="WHATSAPP">WhatsApp</option>
+                  <option value="EMAIL">Email</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Message</label>
+                <textarea
+                  value={reminderModal.message}
+                  onChange={e => setReminderModal(s => ({ ...s, message: e.target.value }))}
+                  className="w-full px-3 py-2 rounded border border-gray-300 text-sm min-h-[120px]"
+                />
+              </div>
+              {reminderModal.error && (
+                <div className="p-3 rounded bg-red-50 border border-red-200">
+                  <p className="text-sm text-red-700">{reminderModal.error}</p>
+                </div>
+              )}
+              <p className="text-xs text-gray-500">
+                The reminder is recorded in the communications log. Actual SMS/WhatsApp/Email delivery is handled by the notification gateway and may be processed asynchronously.
+              </p>
+            </div>
+            <div className="flex gap-3 justify-end pt-4 mt-4 border-t" style={{ borderColor: 'var(--border-primary)' }}>
+              <Button variant="secondary" size="sm" onClick={() => setReminderModal(s => ({ ...s, open: false }))} disabled={reminderModal.loading}>
+                Cancel
+              </Button>
+              <Button variant="primary" size="sm" onClick={submitReminder} loading={reminderModal.loading} disabled={reminderModal.loading || !reminderModal.message.trim()}>
+                Send
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Communication Logs Modal */}
+      {commLogsModal.open && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.5)' }}
+          onClick={() => setCommLogsModal({ open: false, receivable: null, logs: [], loading: false, error: null })}
+        >
+          <div className="w-full max-w-2xl bg-white rounded-lg shadow-xl p-6 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold">
+                Communication Logs {commLogsModal.receivable ? `— ${commLogsModal.receivable.studentName}` : ''}
+              </h2>
+              <button onClick={() => setCommLogsModal({ open: false, receivable: null, logs: [], loading: false, error: null })} className="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
+            </div>
+            {commLogsModal.loading && <p className="text-sm text-gray-500">Loading…</p>}
+            {commLogsModal.error && <p className="text-sm text-red-600">{commLogsModal.error}</p>}
+            {!commLogsModal.loading && !commLogsModal.error && (
+              commLogsModal.logs.length === 0 ? (
+                <p className="text-sm text-gray-500">No communications recorded for this receivable.</p>
+              ) : (
+                <ul className="space-y-3">
+                  {commLogsModal.logs.map((log: any) => (
+                    <li key={log.id} className="border rounded p-3 text-sm" style={{ borderColor: 'var(--border-gray-200)' }}>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="font-medium">{log.purpose} — {log.channel}</span>
+                        <Badge variant={log.status === 'SENT' || log.status === 'DELIVERED' ? 'success' : log.status === 'FAILED' ? 'error' : 'warning'} size="sm">
+                          {log.status}
+                        </Badge>
+                      </div>
+                      <div className="text-xs text-gray-500 mb-1">
+                        To {log.recipient_contact} · {new Date(log.created_at).toLocaleString()}
+                      </div>
+                      {log.subject && <div className="text-xs font-medium mb-1">{log.subject}</div>}
+                      <div className="text-xs whitespace-pre-wrap">{log.message_body}</div>
+                    </li>
+                  ))}
+                </ul>
+              )
+            )}
           </div>
         </div>
       )}

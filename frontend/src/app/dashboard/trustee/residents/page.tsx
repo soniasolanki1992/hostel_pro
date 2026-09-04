@@ -9,6 +9,7 @@ import { FileText } from 'lucide-react';
 import type { TableColumn } from '@/components/types';
 import { cn } from '@/components/utils';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { EmergencyInfoModal } from '@/components/EmergencyInfoModal';
 
 type Vertical = 'BOYS' | 'GIRLS' | 'DHARAMSHALA';
 
@@ -43,6 +44,7 @@ export default function TrusteeResidentsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedVertical, setSelectedVertical] = useState<Vertical | 'ALL'>('ALL');
   const [selectedResident, setSelectedResident] = useState<Resident | null>(null);
+  const [emergencyResident, setEmergencyResident] = useState<Resident | null>(null);
   const [residentDocs, setResidentDocs] = useState<any[]>([]);
   const [docsLoading, setDocsLoading] = useState(false);
 
@@ -207,9 +209,20 @@ export default function TrusteeResidentsPage() {
       key: 'actions',
       header: t('Actions', 'कार्रवाई'),
       render: (_: any, row: Resident) => (
-        <Button variant="secondary" size="sm" onClick={() => openResidentDetails(row)}>
-          {t('View Details', 'विवरण देखें')}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" size="sm" onClick={() => openResidentDetails(row)}>
+            {t('View Details', 'विवरण देखें')}
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => setEmergencyResident(row)}
+            style={{ background: '#dc2626', borderColor: '#dc2626' }}
+            aria-label={`Emergency info for ${row.name}`}
+          >
+            🚨 {t('Emergency', 'आपातकाल')}
+          </Button>
+        </div>
       ),
     },
   ];
@@ -359,6 +372,15 @@ export default function TrusteeResidentsPage() {
         columns={columns}
         emptyMessage={t('No residents found', 'कोई निवासी नहीं मिला')}
       />
+
+      {/* Emergency Info Modal */}
+      {emergencyResident && (
+        <EmergencyInfoModal
+          studentId={emergencyResident.id}
+          studentName={emergencyResident.name}
+          onClose={() => setEmergencyResident(null)}
+        />
+      )}
 
       {/* Resident Detail Panel */}
       {selectedResident && (

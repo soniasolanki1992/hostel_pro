@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from 'react';
 import { Briefcase, MapPin, Clock, User, Building, IndianRupee } from 'lucide-react';
 import PublicLayout from '@/components/public/PublicLayout';
 import PageHero from '@/components/public/PageHero';
@@ -7,12 +8,31 @@ import { Button } from '@/components/shadcn/button';
 import { Card, CardContent } from '@/components/shadcn/card';
 import { Badge } from '@/components/shadcn/badge';
 import { useLanguage } from '@/contexts/LanguageContext';
-import jobsData from '@/data/jobs.json';
+
+interface JobItem {
+  id: string;
+  title: string;
+  company: string;
+  location: string;
+  type: string;
+  salary: string;
+  description: string;
+  postedBy: { name: string; batch: string };
+  postedAt: string;
+  status: string;
+}
 
 const AlumniJobs = () => {
   const { t } = useLanguage();
+  const [activeJobs, setActiveJobs] = useState<JobItem[]>([]);
 
-  const activeJobs = jobsData.filter(j => j.status === 'active');
+  useEffect(() => {
+    (async () => {
+      const res = await fetch('/api/alumni/jobs');
+      const data = await res.json();
+      if (res.ok && data.success) setActiveJobs(data.data);
+    })();
+  }, []);
 
   const getJobTypeColor = (type: string) => {
     switch (type) {

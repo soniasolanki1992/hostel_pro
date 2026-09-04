@@ -68,15 +68,20 @@ export function notFoundResponse(message: string = 'Resource not found'): NextRe
 
 export function serverErrorResponse(
   message: string = 'Internal server error',
-  _error?: Error
+  error?: Error | unknown
 ): NextResponse {
-  // Don't expose error details to client in production
-  const clientMessage =
-    process.env.NODE_ENV === 'development'
-      ? message
-      : 'An unexpected error occurred';
+  const isDev = process.env.NODE_ENV !== 'production';
+  const clientMessage = isDev ? message : 'An unexpected error occurred';
+  const details = isDev && error
+    ? {
+        cause: error instanceof Error ? error.message : String(error),
+        ...(error instanceof Error && (error as any).code ? { code: (error as any).code } : {}),
+        ...(error instanceof Error && (error as any).detail ? { detail: (error as any).detail } : {}),
+        ...(error instanceof Error && error.stack ? { stack: error.stack.split('\n').slice(0, 5).join('\n') } : {}),
+      }
+    : undefined;
 
-  return errorResponse(clientMessage, HTTP_STATUS.INTERNAL_SERVER_ERROR);
+  return errorResponse(clientMessage, HTTP_STATUS.INTERNAL_SERVER_ERROR, details);
 }
 
 // ============================================================================

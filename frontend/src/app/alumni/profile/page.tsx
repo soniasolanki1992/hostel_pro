@@ -20,33 +20,64 @@ const AlumniProfile = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Mock profile data
   const [profile, setProfile] = useState({
-    name: 'Rahul Jain',
-    email: 'rahul.jain@example.com',
-    phone: '+91 98765 43210',
+    name: '',
+    firstName: '',
+    lastName: '',
+    email: '',
+    phone: '',
     institution: 'boys-hostel',
-    batch: '2012\u20132016',
-    department: 'Commerce',
-    hostelBlock: 'Block A',
-    roomNumber: '204',
-    yearsOfStay: '2012-2016',
-    bio: 'Proud alumnus of the Boys\' Hostel. Currently working in finance.',
+    batch: '',
+    department: '',
+    hostelBlock: '',
+    roomNumber: '',
+    yearsOfStay: '',
+    bio: '',
     visibility: {
       email: 'alumni-only',
       phone: 'private',
       batch: 'alumni-only',
-    },
+    } as Record<string, string>,
   });
 
   useEffect(() => {
-    const session = localStorage.getItem('alumniSession');
-    if (session) {
-      setIsAuthenticated(true);
-    } else {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
+    const role = typeof window !== 'undefined' ? localStorage.getItem('userRole') : null;
+    if (!token || role !== 'ALUMNI') {
       router.push('/alumni/login');
+      return;
     }
-  }, [router]);
+    (async () => {
+      try {
+        const res = await fetch('/api/alumni/me', { headers: { Authorization: `Bearer ${token}` } });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          const d = data.data;
+          setProfile({
+            name: d.name || '',
+            firstName: d.firstName || '',
+            lastName: d.lastName || '',
+            email: d.email || '',
+            phone: d.phone || '',
+            institution: d.institution || 'boys-hostel',
+            batch: d.batch || '',
+            department: d.department || '',
+            hostelBlock: d.hostelBlock || '',
+            roomNumber: d.roomNumber || '',
+            yearsOfStay: d.yearsOfStay || '',
+            bio: d.bio || '',
+            visibility: { email: 'alumni-only', phone: 'private', batch: 'alumni-only', ...(d.visibility || {}) },
+          });
+          setIsAuthenticated(true);
+        } else {
+          toast.error(data.error || t('Failed to load profile', '\u092a\u094d\u0930\u094b\u092b\u093c\u093e\u0907\u0932 \u0932\u094b\u0921 \u0915\u0930\u0928\u0947 \u092e\u0947\u0902 \u0935\u093f\u092b\u0932'));
+          router.push('/alumni/login');
+        }
+      } catch {
+        router.push('/alumni/login');
+      }
+    })();
+  }, [router, t]);
 
   const updateProfile = (field: string, value: string) => {
     setProfile(prev => ({ ...prev, [field]: value }));
@@ -61,10 +92,35 @@ const AlumniProfile = () => {
 
   const handleSave = async () => {
     setIsSaving(true);
-    // Mock save
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    setIsSaving(false);
-    toast.success(t('Your changes have been saved successfully.', 'आपके परिवर्तन सफलतापूर्वक सहेजे गए हैं।'));
+    try {
+      const token = localStorage.getItem('authToken');
+      const [firstName, ...rest] = profile.name.trim().split(' ');
+      const lastName = rest.length ? rest.join(' ') : profile.lastName;
+      const res = await fetch('/api/alumni/me', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          firstName: firstName || profile.firstName,
+          lastName,
+          phone: profile.phone,
+          department: profile.department,
+          hostelBlock: profile.hostelBlock,
+          roomNumber: profile.roomNumber,
+          visibility: profile.visibility,
+          bio: profile.bio,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        toast.error(data.error || t('Failed to save', 'सहेजने में विफल'));
+        return;
+      }
+      toast.success(t('Your changes have been saved successfully.', 'आपके परिवर्तन सफलतापूर्वक सहेजे गए हैं।'));
+    } catch {
+      toast.error(t('Network error', 'नेटवर्क त्रुटि'));
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   if (!isAuthenticated) return null;

@@ -101,7 +101,7 @@ export default function TrusteeReports() {
       // Calculate application stats - use current_status from database
       const total = applications.length;
       const pending = applications.filter(
-        (app: any) => ['SUBMITTED', 'REVIEW', 'INTERVIEW', 'TRUSTEE_REVIEW', 'TRUSTEE_INTERVIEW'].includes(app.current_status || app.status)
+        (app: any) => ['SUBMITTED', 'REVIEW', 'TRUSTEE_REVIEW', 'SHORTLISTED', 'INTERVIEW', 'TRUSTEE_FINAL_REVIEW'].includes(app.current_status || app.status)
       ).length;
       const approved = applications.filter((app: any) => (app.current_status || app.status) === 'APPROVED').length;
       const rejected = applications.filter((app: any) => (app.current_status || app.status) === 'REJECTED').length;

@@ -9,6 +9,9 @@ import {
 } from '@/lib/api/responses';
 import { InterviewAPI, InterviewStatus } from '@/types/api';
 import { requireAuth, getVerticalFilter } from '@/lib/authorize';
+import { sendEmail } from '@/lib/mailer';
+import { renderInterviewScheduled } from '@/lib/email-templates/interview-scheduled';
+import { logger } from '@/lib/logger';
 
 /**
  * GET /api/interviews
@@ -32,13 +35,13 @@ export async function GET(request: NextRequest) {
 
     // Scope interviews by role
     if (verticalFilter) {
-      // Superintendent: only their vertical, only active superintendent-level interviews
+      // Superintendent: only their vertical, only active interviews they conduct
       conditions.push(`a.vertical = $${paramIndex++}`);
       params.push(verticalFilter);
-      conditions.push(`a.current_status NOT IN ('TRUSTEE_REVIEW', 'TRUSTEE_INTERVIEW', 'REJECTED', 'APPROVED', 'WITHDRAWN', 'ARCHIVED')`);
+      conditions.push(`a.current_status = 'INTERVIEW'`);
     } else if (user.role === 'TRUSTEE') {
-      // Trustee: only trustee-level interviews
-      conditions.push(`a.current_status IN ('TRUSTEE_INTERVIEW')`);
+      // Trustees no longer conduct interviews; return none.
+      conditions.push(`1 = 0`);
     }
 
     if (applicationId) {
@@ -161,6 +164,13 @@ export async function POST(request: NextRequest) {
 
     const application = appRows[0];
 
+    // Precondition: applications can only enter INTERVIEW from SHORTLISTED.
+    if (application.current_status !== 'SHORTLISTED') {
+      return badRequestResponse(
+        `Cannot schedule interview: application must be SHORTLISTED (current: ${application.current_status})`
+      );
+    }
+
     // Validate trustee exists if provided
     const effectiveTrusteeId = trustee_id || (await query(
       "SELECT id FROM users WHERE role = 'TRUSTEE' LIMIT 1"
@@ -231,6 +241,32 @@ export async function POST(request: NextRequest) {
         }),
       ]
     );
+
+    // Notify applicant via email
+    if (application.applicant_email) {
+      const origin =
+        request.headers.get('origin') ||
+        process.env.NEXT_PUBLIC_APP_URL ||
+        'http://localhost:3000';
+      const rendered = renderInterviewScheduled({
+        name: application.applicant_name || 'Applicant',
+        trackingNumber: application.tracking_number,
+        scheduleTime: schedule_time,
+        mode: dbMode,
+        trackUrl: `${origin}/track/${application.tracking_number}`,
+      });
+      sendEmail({
+        to: application.applicant_email,
+        subject: rendered.subject,
+        html: rendered.html,
+        text: rendered.text,
+      }).catch((err) => {
+        logger.error('Interview-scheduled email dispatch failed', {
+          applicationId: application_id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }
 
     return createdResponse(
       {

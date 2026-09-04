@@ -39,6 +39,9 @@ interface LeaveRequest {
 // Leave types that need time selection
 const TIME_BASED_CODES = ['SHORT_LEAVE', 'NIGHT_OUT'];
 
+// Only these leave types are offered to students.
+const ALLOWED_LEAVE_CODES = ['NIGHT_OUT', 'MULTI_DAY'];
+
 // Icons per leave type code
 const LEAVE_ICONS: Record<string, string> = {
   SHORT_LEAVE: '📋',
@@ -108,7 +111,7 @@ export default function LeaveManagementPage() {
         if (res.ok) {
           const result = await res.json();
           const data: LeaveType[] = Array.isArray(result.data) ? result.data : [];
-          setLeaveTypes(data);
+          setLeaveTypes(data.filter((lt) => ALLOWED_LEAVE_CODES.includes(lt.code)));
         }
       } catch {}
       finally {
@@ -162,8 +165,7 @@ export default function LeaveManagementPage() {
       errors.toDate = 'To date must be after from date';
     if (!formData.reason.trim()) errors.reason = 'Reason is required';
     if (formData.reason.trim().length < 10) errors.reason = 'Reason must be at least 10 characters';
-    if (selectedType && !TIME_BASED_CODES.includes(selectedType.code) && !formData.destination?.trim())
-      errors.destination = 'Destination is required';
+    if (!formData.destination?.trim()) errors.destination = 'Destination is required';
     setFormErrors(errors);
     return Object.values(errors).every(e => e === '');
   };
@@ -335,16 +337,16 @@ export default function LeaveManagementPage() {
                   />
                 </div>
 
-                {/* Destination — for non-time-based types */}
+                {/* Destination — always required */}
                 <div className="mb-6">
                   <Input
                     type="text"
-                    label={t('Destination', 'गंतव्य') + (!isTimeBased ? ' *' : ` (${t('optional', 'वैकल्पिक')})`)}
+                    label={t('Destination', 'गंतव्य')}
                     placeholder={t('City or place you will be visiting', 'आप जिस शहर या स्थान पर जाएंगे')}
                     value={formData.destination}
                     onChange={(e) => handleInputChange('destination', e.target.value)}
                     error={formErrors.destination}
-                    required={!isTimeBased}
+                    required
                   />
                 </div>
 

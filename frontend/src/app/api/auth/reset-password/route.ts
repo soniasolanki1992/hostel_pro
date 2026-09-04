@@ -1,12 +1,20 @@
 import { NextRequest } from 'next/server';
 import { query } from '@/lib/db';
-import { hashPassword, verifyOtp, createAuditLog, validatePasswordStrength } from '@/lib/auth';
+import {
+  hashPassword,
+  verifyOtp,
+  createAuditLog,
+  validatePasswordStrength,
+  verifySignedSessionToken,
+} from '@/lib/auth';
+import { checkRateLimit, getClientIp } from '@/lib/rate-limit';
 import {
   successResponse,
   unauthorizedResponse,
   badRequestResponse,
   serverErrorResponse,
   validateFields,
+  errorResponse,
 } from '@/lib/api/responses';
 import { AuthAPI } from '@/types/api';
 
@@ -63,17 +71,34 @@ export async function POST(request: NextRequest) {
       return badRequestResponse(passwordError);
     }
 
-    // Decode and verify token
-    let tokenData: any;
-    try {
-      const decoded = Buffer.from(token, 'base64').toString('utf-8');
-      tokenData = JSON.parse(decoded);
-    } catch {
-      return unauthorizedResponse('Invalid reset token');
+    // Per-IP brute-force throttle on the OTP-verify step. (S-14)
+    const ip = getClientIp(request);
+    const rl = checkRateLimit(`reset-password-ip:${ip}`, {
+      maxRequests: 10,
+      windowSeconds: 60 * 60,
+    });
+    if (!rl.allowed) {
+      return errorResponse(
+        'Too many password-reset attempts from this network. Please try again later.',
+        429
+      );
+    }
+
+    // Decode and verify HMAC-signed reset token (S-01, S-11). The helper
+    // validates both the signature and the embedded `exp` claim.
+    const tokenData = verifySignedSessionToken(token) as
+      | { userId?: string; contact?: string; mock?: boolean }
+      | null;
+    if (!tokenData) {
+      return unauthorizedResponse('Invalid or expired reset token');
     }
 
     // Check if token is a mock (user doesn't exist)
     if (tokenData.mock) {
+      return unauthorizedResponse('Invalid reset token');
+    }
+
+    if (!tokenData.userId || !tokenData.contact) {
       return unauthorizedResponse('Invalid reset token');
     }
 

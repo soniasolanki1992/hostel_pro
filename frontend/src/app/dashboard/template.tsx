@@ -7,7 +7,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { Container, useResponsive } from '@/components/layout';
 import { Card } from '@/components/data/Card';
 import { Button } from '@/components/shadcn/button-extended';
-import { Menu, X, LayoutDashboard, Wallet, CalendarDays, BedDouble, FileText, LogOut, FileCheck, Settings, ShieldAlert, History, BookOpen, BarChart3, Users, Lock } from 'lucide-react';
+import { Menu, X, LayoutDashboard, Wallet, CalendarDays, BedDouble, FileText, LogOut, FileCheck, Settings, ShieldAlert, History, BookOpen, BarChart3, Users, Lock, Hourglass, GraduationCap } from 'lucide-react';
 import { LanguageToggle } from '@/components/LanguageToggle';
 import { cn } from '@/components/utils';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -105,11 +105,13 @@ const ResponsiveDashboardTemplate: React.FC<DashboardTemplateProps> = ({
       return [
         { label: t('Applications', 'आवेदन'), href: '/dashboard/superintendent', icon: <LayoutDashboard className="w-4 h-4" /> },
         { label: t('Interviews', 'साक्षात्कार'), href: '/dashboard/superintendent/interviews', icon: <CalendarDays className="w-4 h-4" /> },
+        { label: t('Waitlist', 'प्रतीक्षा सूची'), href: '/dashboard/superintendent/waitlist', icon: <Hourglass className="w-4 h-4" /> },
         { label: t('Residents', 'निवासी'), href: '/dashboard/superintendent/residents', icon: <Users className="w-4 h-4" /> },
         { label: t('Rooms', 'कमरे'), href: '/dashboard/superintendent/rooms', icon: <BedDouble className="w-4 h-4" /> },
         { label: t('Leaves', 'अवकाश'), href: '/dashboard/superintendent/leaves', icon: <CalendarDays className="w-4 h-4" /> },
         { label: t('Clearance', 'मंजूरी'), href: '/dashboard/superintendent/clearance', icon: <FileCheck className="w-4 h-4" /> },
         { label: t('Renewal', 'नवीनीकरण'), href: '/dashboard/superintendent/renewal', icon: <History className="w-4 h-4" /> },
+        { label: t('Alumni', 'पूर्व छात्र'), href: '/alumni/admin', icon: <GraduationCap className="w-4 h-4" /> },
         { label: t('Audit', 'लेखा परीक्षा'), href: '/dashboard/superintendent/audit', icon: <ShieldAlert className="w-4 h-4" /> },
         { label: t('Settings', 'सेटिंग्स'), href: '/dashboard/superintendent/config', icon: <Settings className="w-4 h-4" /> },
       ];
@@ -120,6 +122,7 @@ const ResponsiveDashboardTemplate: React.FC<DashboardTemplateProps> = ({
         { label: t('Residents', 'निवासी'), href: '/dashboard/trustee/residents', icon: <Users className="w-4 h-4" /> },
         { label: t('Interviews', 'साक्षात्कार'), href: '/dashboard/trustee/interviews', icon: <CalendarDays className="w-4 h-4" /> },
         { label: t('Allocations', 'आवंटन'), href: '/dashboard/trustee/allocations', icon: <BedDouble className="w-4 h-4" /> },
+        { label: t('Alumni', 'पूर्व छात्र'), href: '/alumni/admin', icon: <GraduationCap className="w-4 h-4" /> },
         { label: t('Reports', 'रिपोर्ट'), href: '/dashboard/trustee/reports', icon: <BarChart3 className="w-4 h-4" /> },
       ];
     } else if (path.startsWith('/dashboard/accounts')) {

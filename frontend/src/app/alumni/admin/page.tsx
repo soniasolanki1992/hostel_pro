@@ -1,22 +1,17 @@
 "use client";
 
-import { useState } from 'react';
-import { Shield, Users, Calendar, Briefcase, Bell, FileText, Check, X, Eye, Trash2, Clock, Lock, KeyRound } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { Shield, Users, Calendar, Briefcase, Bell, FileText, Check, X, Eye, Trash2, Clock, Lock } from 'lucide-react';
 import PublicLayout from '@/components/public/PublicLayout';
 import PageHero from '@/components/public/PageHero';
 import { Button } from '@/components/shadcn/button';
-import { Input } from '@/components/shadcn/input';
-import { Label } from '@/components/shadcn/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/shadcn/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/shadcn/tabs';
 import { Badge } from '@/components/shadcn/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/shadcn/dialog';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { toast } from 'sonner';
-import applicationsData from '@/data/applications.json';
-import alumniData from '@/data/alumni.json';
-import eventsData from '@/data/events.json';
-import jobsData from '@/data/jobs.json';
 import institutions from '@/data/institutions.json';
 
 interface Application {
@@ -30,78 +25,85 @@ interface Application {
   status: string;
   submittedAt: string;
 }
+interface AlumniRow { id: string; name: string; institution: string; batch: string; department: string }
+interface EventRow { id: string; title: string; date: string; location: string; status: string }
+interface JobRow { id: string; title: string; company: string; status: string; postedBy: { name: string; batch: string } }
 
 const AlumniAdmin = () => {
   const { t } = useLanguage();
+  const router = useRouter();
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
-  const [adminEmail, setAdminEmail] = useState('');
-  const [adminOtp, setAdminOtp] = useState('');
-  const [otpSent, setOtpSent] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [applications, setApplications] = useState<Application[]>(applicationsData as Application[]);
+  const [pendingApplications, setPendingApplications] = useState<Application[]>([]);
+  const [approvedAlumni, setApprovedAlumni] = useState<AlumniRow[]>([]);
+  const [events, setEvents] = useState<EventRow[]>([]);
+  const [jobs, setJobs] = useState<JobRow[]>([]);
   const [selectedApp, setSelectedApp] = useState<Application | null>(null);
   const [actionType, setActionType] = useState<'approve' | 'reject' | null>(null);
 
-  // Admin login handlers
-  const handleSendAdminOtp = async () => {
-    if (!adminEmail) {
-      toast.error(t('Please enter admin email address.', 'कृपया व्यवस्थापक ईमेल पता दर्ज करें।'));
+  const STAFF_ROLES = ['TRUSTEE', 'SUPERINTENDENT', 'ACCOUNTS'];
+
+  const loadAdminData = async (token: string) => {
+    const headers = { Authorization: `Bearer ${token}` };
+    const [pendingRes, approvedRes, evRes, jbRes] = await Promise.all([
+      fetch('/api/alumni/admin/applications?status=PENDING', { headers }),
+      fetch('/api/alumni/admin/applications?status=APPROVED', { headers }),
+      fetch('/api/alumni/events', { headers }),
+      fetch('/api/alumni/jobs', { headers }),
+    ]);
+    const pending = await pendingRes.json();
+    const approved = await approvedRes.json();
+    const ev = await evRes.json();
+    const jb = await jbRes.json();
+    if (pending.success) setPendingApplications(pending.data);
+    if (approved.success) {
+      setApprovedAlumni(approved.data.map((a: Application) => ({
+        id: a.id, name: a.name, institution: a.institution,
+        batch: `${a.yearOfJoining}-${a.yearOfPassing}`, department: a.department,
+      })));
+    }
+    if (ev.success) setEvents(ev.data);
+    if (jb.success) setJobs(jb.data);
+  };
+
+  useEffect(() => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
+    const role = typeof window !== 'undefined' ? localStorage.getItem('userRole') : null;
+    if (!token || !role || !STAFF_ROLES.includes(role)) {
+      setIsAdminAuthenticated(false);
       return;
     }
-    setIsLoading(true);
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    setIsLoading(false);
-    setOtpSent(true);
-    toast.success(t('Use OTP 999999 for admin login demo.', 'व्यवस्थापक लॉगिन डेमो के लिए OTP 999999 का उपयोग करें।'));
-  };
-
-  const handleVerifyAdminOtp = async () => {
-    setIsLoading(true);
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    setIsLoading(false);
-
-    // Mock admin OTP - use 999999 for admin
-    if (adminOtp === '999999') {
-      setIsAdminAuthenticated(true);
-      toast.success(t('Welcome to the Admin Panel!', 'व्यवस्थापक पैनल में आपका स्वागत है!'));
-    } else {
-      toast.error(t('Use 999999 for admin demo.', 'व्यवस्थापक डेमो के लिए 999999 का उपयोग करें।'));
-    }
-  };
-
-  // Mock audit log
-  const auditLog = [
-    { id: 1, action: 'Application Approved', user: 'admin@trust.org', target: 'Rahul Jain', timestamp: '2024-12-20T10:30:00Z' },
-    { id: 2, action: 'Application Rejected', user: 'admin@trust.org', target: 'John Doe', timestamp: '2024-12-19T15:45:00Z' },
-    { id: 3, action: 'Event Created', user: 'admin@trust.org', target: 'Annual Reunion 2025', timestamp: '2024-12-18T09:00:00Z' },
-    { id: 4, action: 'Job Posted', user: 'moderator@trust.org', target: 'Software Engineer at TechCorp', timestamp: '2024-12-17T14:20:00Z' },
-  ];
-
-  const pendingApplications = applications.filter(a => a.status === 'pending');
-  const approvedAlumni = alumniData.filter(a => a.status === 'approved');
+    setIsAdminAuthenticated(true);
+    loadAdminData(token).catch(() => toast.error(t('Failed to load admin data', 'व्यवस्थापक डेटा लोड करने में विफल')));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleAction = (app: Application, type: 'approve' | 'reject') => {
     setSelectedApp(app);
     setActionType(type);
   };
 
-  const confirmAction = () => {
+  const confirmAction = async () => {
     if (!selectedApp || !actionType) return;
-
-    setApplications(prev =>
-      prev.map(app =>
-        app.id === selectedApp.id
-          ? { ...app, status: actionType === 'approve' ? 'approved' : 'rejected' }
-          : app
-      )
-    );
-
-    toast.success(
-      `${selectedApp.name}'s ${t('application has been', 'का आवेदन')} ${actionType === 'approve' ? t('approved', 'स्वीकृत किया गया') : t('rejected', 'अस्वीकृत किया गया')}.`
-    );
-
-    setSelectedApp(null);
-    setActionType(null);
+    const token = localStorage.getItem('authToken');
+    try {
+      const res = await fetch(`/api/alumni/admin/applications/${selectedApp.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: actionType }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        toast.error(data.error || t('Action failed', 'कार्रवाई विफल'));
+        return;
+      }
+      toast.success(
+        `${selectedApp.name}'s ${t('application has been', 'का आवेदन')} ${actionType === 'approve' ? t('approved', 'स्वीकृत किया गया') : t('rejected', 'अस्वीकृत किया गया')}.`
+      );
+      if (token) await loadAdminData(token);
+    } finally {
+      setSelectedApp(null);
+      setActionType(null);
+    }
   };
 
   const formatDate = (dateStr: string) => {
@@ -117,11 +119,13 @@ const AlumniAdmin = () => {
   const stats = [
     { label: t('Pending Applications', 'लंबित आवेदन'), value: pendingApplications.length, icon: FileText, color: 'text-secondary' },
     { label: t('Total Alumni', 'कुल पूर्व छात्र'), value: approvedAlumni.length, icon: Users, color: 'text-primary' },
-    { label: t('Active Events', 'सक्रिय कार्यक्रम'), value: eventsData.filter(e => e.status === 'upcoming').length, icon: Calendar, color: 'text-accent' },
-    { label: t('Job Postings', 'नौकरी पोस्टिंग'), value: jobsData.filter(j => j.status === 'active').length, icon: Briefcase, color: 'text-primary' },
+    { label: t('Active Events', 'सक्रिय कार्यक्रम'), value: events.filter(e => e.status === 'upcoming').length, icon: Calendar, color: 'text-accent' },
+    { label: t('Job Postings', 'नौकरी पोस्टिंग'), value: jobs.filter(j => j.status === 'active').length, icon: Briefcase, color: 'text-primary' },
   ];
 
-  // Admin Login Screen
+  const auditLog: { id: number; action: string; user: string; target: string; timestamp: string }[] = [];
+
+  // Admin Login Screen — gate via staff JWT (Trustee / Superintendent / Accounts).
   if (!isAdminAuthenticated) {
     return (
       <PublicLayout>
@@ -135,76 +139,17 @@ const AlumniAdmin = () => {
             <Card>
               <CardHeader className="text-center">
                 <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-primary/10 flex items-center justify-center">
-                  {otpSent ? <KeyRound className="h-8 w-8 text-primary" /> : <Lock className="h-8 w-8 text-primary" />}
+                  <Lock className="h-8 w-8 text-primary" />
                 </div>
-                <CardTitle className="font-heading">
-                  {otpSent ? t('Enter Admin OTP', 'व्यवस्थापक OTP दर्ज करें') : t('Admin Authentication', 'व्यवस्थापक प्रमाणीकरण')}
-                </CardTitle>
+                <CardTitle className="font-heading">{t('Admin Authentication', 'व्यवस्थापक प्रमाणीकरण')}</CardTitle>
                 <CardDescription>
-                  {otpSent
-                    ? t('Enter the 6-digit code sent to admin email', 'व्यवस्थापक ईमेल पर भेजा गया 6-अंकीय कोड दर्ज करें')
-                    : t('Only authorized administrators can access this panel', 'केवल अधिकृत प्रशासक ही इस पैनल तक पहुंच सकते हैं')
-                  }
+                  {t('Sign in with your staff account (Trustee / Superintendent / Accounts) to access the alumni admin panel.', 'पूर्व छात्र व्यवस्थापक पैनल तक पहुंचने के लिए अपने स्टाफ खाते से साइन इन करें।')}
                 </CardDescription>
               </CardHeader>
-
-              <CardContent className="space-y-6">
-                {!otpSent ? (
-                  <>
-                    <div className="space-y-2">
-                      <Label htmlFor="adminEmail">{t('Admin Email', 'व्यवस्थापक ईमेल')}</Label>
-                      <Input
-                        id="adminEmail"
-                        type="email"
-                        value={adminEmail}
-                        onChange={(e) => setAdminEmail(e.target.value)}
-                        placeholder="admin@trust.org"
-                      />
-                    </div>
-
-                    <Button onClick={handleSendAdminOtp} disabled={isLoading} className="w-full">
-                      {isLoading ? t('Sending...', 'भेज रहा है...') : t('Send OTP', 'OTP भेजें')}
-                    </Button>
-                  </>
-                ) : (
-                  <>
-                    <div className="space-y-2">
-                      <Label htmlFor="adminOtp">{t('Admin OTP', 'व्यवस्थापक OTP')}</Label>
-                      <Input
-                        id="adminOtp"
-                        type="text"
-                        inputMode="numeric"
-                        maxLength={6}
-                        value={adminOtp}
-                        onChange={(e) => setAdminOtp(e.target.value.replace(/\D/g, ''))}
-                        placeholder="999999"
-                        className="text-center text-2xl tracking-widest"
-                      />
-                      <p className="text-xs text-muted-foreground text-center">
-                        {t('Sent to', 'भेजा गया')}: {adminEmail}
-                      </p>
-                    </div>
-
-                    <Button onClick={handleVerifyAdminOtp} disabled={isLoading} className="w-full">
-                      {isLoading ? t('Verifying...', 'सत्यापित कर रहा है...') : t('Verify & Login', 'सत्यापित करें और लॉगिन करें')}
-                    </Button>
-
-                    <Button variant="ghost" onClick={() => setOtpSent(false)} className="w-full">
-                      {t('Use different email', 'अलग ईमेल उपयोग करें')}
-                    </Button>
-                  </>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Demo Notice */}
-            <Card className="mt-4 bg-primary/5 border-primary/20">
-              <CardContent className="pt-4">
-                <p className="text-sm text-center text-muted-foreground">
-                  <strong>{t('Demo Mode:', 'डेमो मोड:')}</strong><br/>
-                  {t('Email:', 'ईमेल:')} <code className="bg-muted px-1 rounded">admin@trust.org</code><br/>
-                  {t('OTP:', 'OTP:')} <code className="bg-muted px-1 rounded">999999</code>
-                </p>
+              <CardContent>
+                <Button onClick={() => router.push('/login')} className="w-full">
+                  {t('Go to Staff Login', 'स्टाफ लॉगिन पर जाएं')}
+                </Button>
               </CardContent>
             </Card>
           </div>
@@ -380,7 +325,7 @@ const AlumniAdmin = () => {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-3">
-                    {eventsData.map((event) => (
+                    {events.map((event) => (
                       <div key={event.id} className="flex items-center justify-between p-3 rounded-lg bg-muted/30">
                         <div>
                           <p className="font-medium">{event.title}</p>
@@ -407,7 +352,7 @@ const AlumniAdmin = () => {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-3">
-                    {jobsData.map((job) => (
+                    {jobs.map((job) => (
                       <div key={job.id} className="flex items-center justify-between p-3 rounded-lg bg-muted/30">
                         <div>
                           <p className="font-medium">{job.title}</p>

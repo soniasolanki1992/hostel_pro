@@ -7,9 +7,9 @@ import { Button } from '@/components/shadcn/button-extended';
 import { Chip } from '@/components/shadcn/chip';
 import { FileText } from 'lucide-react';
 
-export type ApplicationStatus = 'DRAFT' | 'SUBMITTED' | 'REVIEW' | 'INTERVIEW' | 'TRUSTEE_REVIEW' | 'TRUSTEE_INTERVIEW' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN' | 'ARCHIVED';
+export type ApplicationStatus = 'DRAFT' | 'SUBMITTED' | 'REVIEW' | 'TRUSTEE_REVIEW' | 'SHORTLISTED' | 'INTERVIEW' | 'TRUSTEE_FINAL_REVIEW' | 'WAITLIST' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN' | 'ARCHIVED';
 export type Vertical = 'BOYS' | 'GIRLS' | 'DHARAMSHALA';
-export type DecisionType = 'APPROVE' | 'REJECT' | 'SCHEDULE_INTERVIEW';
+export type DecisionType = 'SHORTLIST' | 'APPROVE' | 'REJECT';
 
 export interface Application {
   id: string;
@@ -44,22 +44,20 @@ interface ApplicationReviewModalProps {
   isOpen: boolean;
   onClose: () => void;
   application: Application | null;
-  onProvisionalApprove?: (applicationId: string, requiresInterview: boolean, remarks: string) => Promise<void>;
-  onProvisionalReject?: (applicationId: string, remarks: string) => Promise<void>;
+  onShortlist?: (applicationId: string, remarks: string) => Promise<void>;
   onFinalApprove: (applicationId: string, remarks: string) => Promise<void>;
   onFinalReject: (applicationId: string, remarks: string) => Promise<void>;
   onSendMessage?: (applicationId: string) => void;
-  onScheduleInterview?: (application: Application) => void;
 }
 
 export function ApplicationReviewModal({
   isOpen,
   onClose,
   application,
+  onShortlist,
   onFinalApprove,
   onFinalReject,
   onSendMessage,
-  onScheduleInterview,
 }: ApplicationReviewModalProps) {
   const [activeTab, setActiveTab] = useState<'summary' | 'documents' | 'interview' | 'audit'>('summary');
   const [decisionRemarks, setDecisionRemarks] = useState('');
@@ -95,9 +93,11 @@ export function ApplicationReviewModal({
 
   const getStatusVariant = (status: ApplicationStatus): BadgeVariant => {
     switch (status) {
-      case 'TRUSTEE_REVIEW': return 'info';
-      case 'TRUSTEE_INTERVIEW':
+      case 'TRUSTEE_REVIEW':
+      case 'TRUSTEE_FINAL_REVIEW': return 'info';
+      case 'SHORTLISTED':
       case 'INTERVIEW': return 'warning';
+      case 'WAITLIST': return 'warning';
       case 'APPROVED': return 'success';
       case 'REJECTED':
       case 'WITHDRAWN': return 'error';
@@ -107,8 +107,12 @@ export function ApplicationReviewModal({
 
   const STATUS_LABELS: Record<string, string> = {
     DRAFT: 'Draft', SUBMITTED: 'Submitted', REVIEW: 'Under Review',
-    INTERVIEW: 'Interview', TRUSTEE_REVIEW: 'Trustee Review',
-    TRUSTEE_INTERVIEW: 'Trustee Interview', APPROVED: 'Approved',
+    TRUSTEE_REVIEW: 'Pending Trustee Review',
+    SHORTLISTED: 'Shortlisted',
+    INTERVIEW: 'Interview Scheduled',
+    TRUSTEE_FINAL_REVIEW: 'Pending Trustee Final Review',
+    WAITLIST: 'Waitlisted',
+    APPROVED: 'Approved',
     REJECTED: 'Rejected', WITHDRAWN: 'Withdrawn', ARCHIVED: 'Archived',
   };
 
@@ -122,14 +126,14 @@ export function ApplicationReviewModal({
     setError(null);
     try {
       switch (type) {
+        case 'SHORTLIST':
+          if (onShortlist) await onShortlist(application.id, decisionRemarks);
+          break;
         case 'APPROVE':
           await onFinalApprove(application.id, decisionRemarks);
           break;
         case 'REJECT':
           await onFinalReject(application.id, decisionRemarks);
-          break;
-        case 'SCHEDULE_INTERVIEW':
-          if (onScheduleInterview) onScheduleInterview(application);
           break;
       }
       setDecisionRemarks('');
@@ -277,8 +281,8 @@ export function ApplicationReviewModal({
               </div>
             )}
 
-            {/* Action Buttons - inline like superintendent dashboard */}
-            {['TRUSTEE_REVIEW', 'TRUSTEE_INTERVIEW'].includes(application.status) && (
+            {/* Action Buttons - status-driven */}
+            {(application.status === 'TRUSTEE_REVIEW' || application.status === 'TRUSTEE_FINAL_REVIEW') && (
               <div className="pt-4 border-t space-y-3" style={{ borderColor: 'var(--border-gray-200)' }}>
                 <div>
                   <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-primary)' }}>
@@ -298,34 +302,56 @@ export function ApplicationReviewModal({
                   </div>
                 )}
                 <div className="flex flex-wrap gap-3">
-                  <Button
-                    variant="primary"
-                    onClick={() => handleDecision('APPROVE')}
-                    loading={isProcessing}
-                  >
-                    Approve
-                  </Button>
-                  <Button
-                    variant="destructive"
-                    onClick={() => handleDecision('REJECT')}
-                    loading={isProcessing}
-                  >
-                    Reject
-                  </Button>
-                  {application.status === 'TRUSTEE_REVIEW' && !application.interviewScheduled && onScheduleInterview && (
-                    <Button
-                      variant="secondary"
-                      onClick={() => onScheduleInterview(application)}
-                    >
-                      Schedule Interview
-                    </Button>
+                  {application.status === 'TRUSTEE_REVIEW' ? (
+                    <>
+                      <Button
+                        variant="primary"
+                        onClick={() => handleDecision('SHORTLIST')}
+                        loading={isProcessing}
+                      >
+                        Shortlist
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        onClick={() => handleDecision('REJECT')}
+                        loading={isProcessing}
+                      >
+                        Reject
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <Button
+                        variant="primary"
+                        onClick={() => handleDecision('APPROVE')}
+                        loading={isProcessing}
+                      >
+                        Override &amp; Approve
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        onClick={() => handleDecision('REJECT')}
+                        loading={isProcessing}
+                      >
+                        Confirm Reject
+                      </Button>
+                    </>
                   )}
                 </div>
-                <div className="p-3 rounded border-l-4 bg-blue-50 border-blue-500">
-                  <p className="text-sm text-blue-800">
-                    <strong>Note:</strong> Approval will create a student account and send login credentials to the applicant.
-                  </p>
-                </div>
+                {application.status === 'TRUSTEE_REVIEW' && (
+                  <div className="p-3 rounded border-l-4 bg-blue-50 border-blue-500">
+                    <p className="text-sm text-blue-800">
+                      <strong>Note:</strong> Shortlisting sends the application back to the Superintendent to schedule the interview.
+                    </p>
+                  </div>
+                )}
+                {application.status === 'TRUSTEE_FINAL_REVIEW' && (
+                  <div className="p-3 rounded border-l-4 bg-yellow-50 border-yellow-500">
+                    <p className="text-sm text-yellow-800">
+                      <strong>Note:</strong> Superintendent rejected this candidate after interview. Override to approve and create a student account, or confirm the rejection.
+                    </p>
+                  </div>
+                )}
               </div>
             )}
 
@@ -462,12 +488,7 @@ export function ApplicationReviewModal({
               </>
             ) : (
               <div className="text-center py-8">
-                <p className="text-gray-600 mb-4">No interview scheduled for this application.</p>
-                {application.status === 'TRUSTEE_REVIEW' && onScheduleInterview && (
-                  <Button variant="primary" onClick={() => onScheduleInterview(application)}>
-                    Schedule Interview
-                  </Button>
-                )}
+                <p className="text-gray-600 mb-4">Interviews are scheduled and conducted by the Superintendent after shortlisting.</p>
               </div>
             )}
           </div>

@@ -48,7 +48,13 @@ export async function GET(request: NextRequest) {
     }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-    const sql = `SELECT * FROM applications ${whereClause} ORDER BY created_at DESC`;
+
+    const limitParam = parseInt(searchParams.get('limit') || '100', 10);
+    const limit = Math.min(Math.max(limitParam, 1), 500);
+    const offsetParam = parseInt(searchParams.get('offset') || '0', 10);
+    const offset = Math.max(offsetParam, 0);
+    const sql = `SELECT * FROM applications ${whereClause} ORDER BY created_at DESC LIMIT $${paramIndex++} OFFSET $${paramIndex++}`;
+    params.push(limit, offset);
 
     const { rows } = await query(sql, params);
 
@@ -78,6 +84,24 @@ export async function POST(request: NextRequest) {
       'DHARAMSHALA': 'DHARAMSHALA',
     };
     const vertical = verticalMap[body.vertical] || 'BOYS_HOSTEL';
+
+    // Reject if admissions for this vertical are closed by the Superintendent.
+    const verticalSlugMap: Record<string, string> = {
+      'BOYS_HOSTEL': 'boys-hostel',
+      'GIRLS_ASHRAM': 'girls-ashram',
+      'DHARAMSHALA': 'dharamshala',
+    };
+    const verticalSlug = verticalSlugMap[vertical];
+    const { rows: settingRows } = await query(
+      'SELECT value FROM system_settings WHERE key = $1',
+      [`applications_open_${verticalSlug}`],
+    );
+    if (settingRows?.[0]?.value === 'false') {
+      return NextResponse.json(
+        { success: false, error: `Admissions for ${verticalSlug} are currently closed. Please check back later.` },
+        { status: 403 },
+      );
+    }
 
     // Generate tracking number based on vertical
     const prefix = vertical === 'BOYS_HOSTEL' ? 'BH' : vertical === 'GIRLS_ASHRAM' ? 'GA' : 'DH';
@@ -208,16 +232,18 @@ export async function POST(request: NextRequest) {
       documents: body.documents || [],
     };
 
-    const currentStatus = body.status || 'DRAFT';
-    const submittedAt = body.status === 'SUBMITTED' ? new Date().toISOString() : null;
+    const isHostelVertical = vertical === 'BOYS_HOSTEL' || vertical === 'GIRLS_ASHRAM';
 
-
+    // Hostel verticals: force DRAFT — only the PhonePe verify route flips to SUBMITTED.
+    // Dharamshala: honor whatever status the client sent (typically SUBMITTED).
+    const currentStatus = isHostelVertical ? 'DRAFT' : (body.status || 'DRAFT');
+    const submittedAt = currentStatus === 'SUBMITTED' ? new Date().toISOString() : null;
 
     const { rows } = await query(
       `INSERT INTO applications (
         tracking_number, type, applicant_name, applicant_mobile, applicant_email,
-        date_of_birth, gender, vertical, current_status, data, submitted_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        vertical, current_status, data, submitted_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       RETURNING *`,
       [
         trackingNumber,
@@ -225,8 +251,6 @@ export async function POST(request: NextRequest) {
         applicantName,
         applicantMobile,
         applicantEmail,
-        dateOfBirth,
-        gender,
         vertical,
         currentStatus,
         JSON.stringify(data),
@@ -235,6 +259,15 @@ export async function POST(request: NextRequest) {
     );
 
     const application = rows[0];
+
+    // For hostel verticals, create the ADMISSION_FEE row that the PhonePe flow will pay.
+    if (isHostelVertical) {
+      await query(
+        `INSERT INTO fees (application_id, fee_head, description, amount, status, due_date)
+         VALUES ($1, 'ADMISSION_FEE', 'Non-refundable admission fee', 500, 'PENDING', NOW() + INTERVAL '7 days')`,
+        [application.id],
+      );
+    }
 
     // Return with trackingNumber in root for frontend compatibility
     return createdResponse({

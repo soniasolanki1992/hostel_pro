@@ -8,6 +8,9 @@ import {
 } from '@/lib/api/responses';
 import { LeaveStatus } from '@/types/api';
 import { requireAuth } from '@/lib/authorize';
+import { sendEmail } from '@/lib/mailer';
+import { renderLeaveDecision } from '@/lib/email-templates/leave-decision';
+import { logger } from '@/lib/logger';
 
 /**
  * PUT /api/leaves/[id]/approve
@@ -74,6 +77,40 @@ export async function PUT(
 
       return updatedRows[0];
     });
+
+    // Notify student via email
+    try {
+      const { rows: studentRows } = await query(
+        'SELECT email, full_name FROM users WHERE id = $1',
+        [leave.student_id]
+      );
+      const student = studentRows[0];
+      if (student?.email) {
+        const rendered = renderLeaveDecision({
+          name: student.full_name || 'Resident',
+          decision: 'APPROVED',
+          leaveType: leave.leave_type,
+          startTime: leave.start_time,
+          endTime: leave.end_time,
+        });
+        sendEmail({
+          to: student.email,
+          subject: rendered.subject,
+          html: rendered.html,
+          text: rendered.text,
+        }).catch((err) => {
+          logger.error('Leave-approved email dispatch failed', {
+            leaveId: id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+      }
+    } catch (err) {
+      logger.error('Leave-approved email lookup failed', {
+        leaveId: id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
 
     return successResponse({ data: updatedLeave });
   } catch (error: any) {

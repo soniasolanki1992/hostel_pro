@@ -8,6 +8,7 @@ import { Spinner } from '@/components/feedback/Spinner';
 import { FileText } from 'lucide-react';
 import type { TableColumn } from '@/components/types';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { EmergencyInfoModal } from '@/components/EmergencyInfoModal';
 
 interface Resident {
   id: string;
@@ -35,6 +36,7 @@ export default function ResidentsPage() {
     tempPassword: string | null;
     error: string | null;
   }>({ loading: false, tempPassword: null, error: null });
+  const [emergencyResident, setEmergencyResident] = useState<Resident | null>(null);
 
   const handleResetPassword = async (resident: Resident) => {
     setResetPasswordState({ loading: true, tempPassword: null, error: null });
@@ -211,13 +213,24 @@ export default function ResidentsPage() {
       key: 'actions',
       header: t('Actions', 'कार्रवाई'),
       render: (_: any, row: Resident) => (
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={() => openResidentDetails(row)}
-        >
-          {t('View Details', 'विवरण देखें')}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => openResidentDetails(row)}
+          >
+            {t('View Details', 'विवरण देखें')}
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => setEmergencyResident(row)}
+            style={{ background: '#dc2626', borderColor: '#dc2626' }}
+            aria-label={`Emergency info for ${row.name}`}
+          >
+            🚨 {t('Emergency', 'आपातकाल')}
+          </Button>
+        </div>
       ),
     },
   ];
@@ -300,6 +313,15 @@ export default function ResidentsPage() {
         columns={columns}
         emptyMessage={t('No residents found', 'कोई निवासी नहीं मिला')}
       />
+
+      {/* Emergency Info Modal */}
+      {emergencyResident && (
+        <EmergencyInfoModal
+          studentId={emergencyResident.id}
+          studentName={emergencyResident.name}
+          onClose={() => setEmergencyResident(null)}
+        />
+      )}
 
       {/* Resident Detail Panel */}
       {selectedResident && (

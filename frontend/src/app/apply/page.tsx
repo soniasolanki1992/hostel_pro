@@ -1,12 +1,27 @@
 'use client';
 
 import Link from "next/link";
-import { ArrowRight, Shield, Users, Clock } from "lucide-react";
+import { ArrowRight, Shield, Users, Clock, Lock } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useLanguage } from '@/contexts/LanguageContext';
 import { LanguageToggle } from '@/components/LanguageToggle';
 
+type Vertical = 'boys-hostel' | 'girls-ashram' | 'dharamshala';
+
 export default function ApplyPage() {
   const { t } = useLanguage();
+  const [openMap, setOpenMap] = useState<Record<Vertical, boolean>>({
+    'boys-hostel': true,
+    'girls-ashram': true,
+    'dharamshala': true,
+  });
+
+  useEffect(() => {
+    fetch('/api/config/applications-status')
+      .then((r) => r.json())
+      .then((d) => { if (d?.success && d.data) setOpenMap(d.data); })
+      .catch(() => { /* keep optimistic defaults */ });
+  }, []);
 
   return (
     <div className="min-h-screen" style={{ background: "var(--bg-page)" }}>
@@ -155,8 +170,8 @@ export default function ApplyPage() {
           {/* Vertical Selection Cards */}
           <div className="grid gap-8 md:grid-cols-3 mb-12">
             {/* Boys Hostel Card */}
-            <Link href="/apply/boys-hostel/contact" className="block h-full">
-              <div className="card p-8 hover:shadow-lg transition-all duration-200 cursor-pointer border-2 border-transparent hover:border-blue-500 h-full flex flex-col">
+            <ApplyCardWrap href="/apply/boys-hostel/contact" open={openMap['boys-hostel']}>
+              <div className={`card p-8 transition-all duration-200 border-2 h-full flex flex-col ${openMap['boys-hostel'] ? 'hover:shadow-lg cursor-pointer border-transparent hover:border-blue-500' : 'border-gray-200 opacity-60 cursor-not-allowed'}`}>
                 <div className="text-center flex flex-col flex-1">
                   <div
                     className="w-20 h-20 mx-auto mb-6 rounded-full flex items-center justify-center"
@@ -191,17 +206,18 @@ export default function ApplyPage() {
                       <span style={{ color: "var(--text-secondary)" }}>{t("24/7 security and warden supervision", "24/7 सुरक्षा और वार्डन निगरानी")}</span>
                     </li>
                   </ul>
-                  <button className="btn-primary w-full mt-auto">
-                    {t("Apply to Boys Hostel", "बालक छात्रावास में आवेदन करें")}
-                    <ArrowRight className="w-4 h-4 ml-2" />
+                  <button className="btn-primary w-full mt-auto" disabled={!openMap['boys-hostel']}>
+                    {openMap['boys-hostel']
+                      ? <>{t("Apply to Boys Hostel", "बालक छात्रावास में आवेदन करें")}<ArrowRight className="w-4 h-4 ml-2" /></>
+                      : <><Lock className="w-4 h-4 mr-2" />{t("Admissions Closed", "प्रवेश बंद")}</>}
                   </button>
                 </div>
               </div>
-            </Link>
+            </ApplyCardWrap>
 
             {/* Girls Ashram Card */}
-            <Link href="/apply/girls-ashram/contact" className="block h-full">
-              <div className="card p-8 hover:shadow-lg transition-all duration-200 cursor-pointer border-2 border-transparent hover:border-purple-500 h-full flex flex-col">
+            <ApplyCardWrap href="/apply/girls-ashram/contact" open={openMap['girls-ashram']}>
+              <div className={`card p-8 transition-all duration-200 border-2 h-full flex flex-col ${openMap['girls-ashram'] ? 'hover:shadow-lg cursor-pointer border-transparent hover:border-purple-500' : 'border-gray-200 opacity-60 cursor-not-allowed'}`}>
                 <div className="text-center flex flex-col flex-1">
                   <div
                     className="w-20 h-20 mx-auto mb-6 rounded-full flex items-center justify-center"
@@ -236,17 +252,18 @@ export default function ApplyPage() {
                       <span style={{ color: "var(--text-secondary)" }}>{t("Matron & warden care", "मैट्रन एवं वार्डन देखभाल")}</span>
                     </li>
                   </ul>
-                  <button className="btn-primary w-full mt-auto">
-                    {t("Apply to Girls Ashram", "बालिका आश्रम में आवेदन करें")}
-                    <ArrowRight className="w-4 h-4 ml-2" />
+                  <button className="btn-primary w-full mt-auto" disabled={!openMap['girls-ashram']}>
+                    {openMap['girls-ashram']
+                      ? <>{t("Apply to Girls Ashram", "बालिका आश्रम में आवेदन करें")}<ArrowRight className="w-4 h-4 ml-2" /></>
+                      : <><Lock className="w-4 h-4 mr-2" />{t("Admissions Closed", "प्रवेश बंद")}</>}
                   </button>
                 </div>
               </div>
-            </Link>
+            </ApplyCardWrap>
 
             {/* Dharamshala Card */}
-            <Link href="/apply/dharamshala/contact" className="block h-full">
-              <div className="card p-8 hover:shadow-lg transition-all duration-200 cursor-pointer border-2 border-transparent hover:border-amber-500 h-full flex flex-col">
+            <ApplyCardWrap href="/apply/dharamshala/contact" open={openMap['dharamshala']}>
+              <div className={`card p-8 transition-all duration-200 border-2 h-full flex flex-col ${openMap['dharamshala'] ? 'hover:shadow-lg cursor-pointer border-transparent hover:border-amber-500' : 'border-gray-200 opacity-60 cursor-not-allowed'}`}>
                 <div className="text-center flex flex-col flex-1">
                   <div
                     className="w-20 h-20 mx-auto mb-6 rounded-full flex items-center justify-center"
@@ -281,12 +298,24 @@ export default function ApplyPage() {
                       <span style={{ color: "var(--text-secondary)" }}>{t("Affordable short-term stay", "किफायती अल्पकालिक प्रवास")}</span>
                     </li>
                   </ul>
-                  <button className="btn-primary w-full mt-auto">
-                    {t("Book Dharamshala", "धरमशाला बुक करें")}
-                    <ArrowRight className="w-4 h-4 ml-2" />
+                  <button className="btn-primary w-full mt-auto" disabled={!openMap['dharamshala']}>
+                    {openMap['dharamshala']
+                      ? <>{t("Book Dharamshala", "धरमशाला बुक करें")}<ArrowRight className="w-4 h-4 ml-2" /></>
+                      : <><Lock className="w-4 h-4 mr-2" />{t("Bookings Closed", "बुकिंग बंद")}</>}
                   </button>
                 </div>
               </div>
+            </ApplyCardWrap>
+          </div>
+
+          {/* Resume link for users who already started an application */}
+          <div className="mb-12 text-center">
+            <Link
+              href="/apply/resume"
+              className="inline-flex items-center gap-2 text-sm font-medium underline"
+              style={{ color: 'var(--text-primary)' }}
+            >
+              {t('Already started? Resume your application →', 'पहले से शुरू किया है? अपना आवेदन फिर से शुरू करें →')}
             </Link>
           </div>
 
@@ -343,6 +372,17 @@ export default function ApplyPage() {
           </div>
         </div>
       </main>
+    </div>
+  );
+}
+
+function ApplyCardWrap({ href, open, children }: { href: string; open: boolean; children: React.ReactNode }) {
+  if (open) {
+    return <Link href={href} className="block h-full">{children}</Link>;
+  }
+  return (
+    <div className="block h-full" aria-disabled="true" title="Admissions are currently closed">
+      {children}
     </div>
   );
 }

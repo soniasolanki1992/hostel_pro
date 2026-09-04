@@ -111,7 +111,7 @@ const AlumniHome = () => {
           </p>
 
           <div className="grid md:grid-cols-3 gap-6 max-w-4xl mx-auto">
-            {institutions.map((institution) => (
+            {institutions.filter((i: { id: string }) => i.id === 'boys-hostel' || i.id === 'girls-hostel').map((institution) => (
               <Card key={institution.id} className="border-border/50 hover:shadow-elegant transition-shadow">
                 <CardContent className="pt-6 text-center">
                   <h3 className="font-heading font-semibold text-lg mb-2">{institution.shortName}</h3>

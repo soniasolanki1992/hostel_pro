@@ -1,9 +1,10 @@
 import { NextRequest } from 'next/server';
 import {
-  extractTokenFromHeader,
   getUserFromToken,
   invalidateAllSessions,
   createAuditLog,
+  verifyToken,
+  revokeJti,
 } from '@/lib/auth';
 import {
   successResponse,
@@ -59,12 +60,23 @@ export async function POST(request: NextRequest) {
       userAgent: request.headers.get('user-agent') || 'unknown',
     });
 
+    // S-25: revoke the access token's jti so it cannot be used until expiry.
+    try {
+      const decoded = verifyToken(token) as { jti?: string; exp?: number };
+      if (decoded.jti && decoded.exp) revokeJti(decoded.jti, decoded.exp);
+    } catch {
+      /* best-effort revoke */
+    }
+
     const response: AuthAPI.LogoutResponse = {
       success: true,
       message: 'Logged out successfully',
     };
 
-    return successResponse(response);
+    // S-08: clear the HttpOnly cookie too.
+    const res = successResponse(response);
+    res.cookies.set('auth_token', '', { httpOnly: true, path: '/', maxAge: 0 });
+    return res;
   } catch (error: any) {
     console.error('Error in /api/auth/logout:', error);
     return serverErrorResponse('Logout failed', error);

@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from 'react';
 import { Calendar, MapPin, Clock, Users } from 'lucide-react';
 import PublicLayout from '@/components/public/PublicLayout';
 import PageHero from '@/components/public/PageHero';
@@ -8,13 +9,32 @@ import { Card, CardContent } from '@/components/shadcn/card';
 import { Badge } from '@/components/shadcn/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/shadcn/tabs';
 import { useLanguage } from '@/contexts/LanguageContext';
-import eventsData from '@/data/events.json';
+
+interface EventItem {
+  id: string;
+  title: string;
+  description: string;
+  date: string;
+  time: string;
+  location: string;
+  type: string;
+  status: string;
+}
 
 const AlumniEvents = () => {
   const { t } = useLanguage();
+  const [events, setEvents] = useState<EventItem[]>([]);
 
-  const upcomingEvents = eventsData.filter(e => e.status === 'upcoming');
-  const pastEvents = eventsData.filter(e => e.status === 'past');
+  useEffect(() => {
+    (async () => {
+      const res = await fetch('/api/alumni/events');
+      const data = await res.json();
+      if (res.ok && data.success) setEvents(data.data);
+    })();
+  }, []);
+
+  const upcomingEvents = events.filter(e => e.status === 'upcoming');
+  const pastEvents = events.filter(e => e.status === 'past');
 
   const getEventTypeColor = (type: string) => {
     switch (type) {
@@ -35,7 +55,7 @@ const AlumniEvents = () => {
     };
   };
 
-  const EventCard = ({ event, isPast = false }: { event: typeof eventsData[0]; isPast?: boolean }) => {
+  const EventCard = ({ event, isPast = false }: { event: EventItem; isPast?: boolean }) => {
     const date = formatDate(event.date);
 
     return (

@@ -12,22 +12,18 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/shadcn/dialog';
 import { Badge } from '@/components/shadcn/badge';
 import { useLanguage } from '@/contexts/LanguageContext';
-import alumniData from '@/data/alumni.json';
 import institutions from '@/data/institutions.json';
 
 interface Alumni {
   id: string;
   name: string;
-  email: string;
+  email: string | null;
+  phone?: string | null;
   institution: string;
   batch: string;
   department: string;
   hostelRoom: string;
-  status: string;
-  visibility: {
-    email: string;
-    phone: string;
-  };
+  visibility: { email: string; phone: string };
 }
 
 const AlumniDirectory = () => {
@@ -38,15 +34,19 @@ const AlumniDirectory = () => {
   const [institutionFilter, setInstitutionFilter] = useState('all');
   const [batchFilter, setBatchFilter] = useState('all');
   const [selectedAlumni, setSelectedAlumni] = useState<Alumni | null>(null);
+  const [approvedAlumni, setApprovedAlumni] = useState<Alumni[]>([]);
 
   useEffect(() => {
-    const session = localStorage.getItem('alumniSession');
-    if (session) {
-      setIsAuthenticated(true);
-    }
+    const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
+    const role = typeof window !== 'undefined' ? localStorage.getItem('userRole') : null;
+    if (!token || role !== 'ALUMNI') return;
+    setIsAuthenticated(true);
+    (async () => {
+      const res = await fetch('/api/alumni/directory', { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      if (res.ok && data.success) setApprovedAlumni(data.data);
+    })();
   }, []);
-
-  const approvedAlumni = alumniData.filter(a => a.status === 'approved');
 
   const filteredAlumni = approvedAlumni.filter(alumni => {
     const matchesSearch = alumni.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -56,7 +56,8 @@ const AlumniDirectory = () => {
     return matchesSearch && matchesInstitution && matchesBatch;
   });
 
-  const uniqueBatches = [...new Set(approvedAlumni.map(a => a.batch))];
+  const uniqueBatches = [...new Set(approvedAlumni.map(a => a.batch).filter(Boolean))];
+  const alumniInstitutions = institutions.filter((i: { id: string }) => i.id === 'boys-hostel' || i.id === 'girls-hostel');
 
   if (!isAuthenticated) {
     return (
@@ -113,7 +114,7 @@ const AlumniDirectory = () => {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">{t('All Institutions', 'सभी संस्थाएं')}</SelectItem>
-                    {institutions.map((inst) => (
+                    {alumniInstitutions.map((inst) => (
                       <SelectItem key={inst.id} value={inst.id}>{inst.shortName}</SelectItem>
                     ))}
                   </SelectContent>

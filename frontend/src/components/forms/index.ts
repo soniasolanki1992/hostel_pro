@@ -5,6 +5,8 @@ export { Textarea } from './Textarea';
 export { Checkbox } from './Checkbox';
 export { Radio } from './Radio';
 export { FileUpload } from './FileUpload';
+export { MultiFileUpload } from './MultiFileUpload';
 export { Stepper } from './Stepper';
 export { FormWizard } from './FormWizard';
 export { InlineHelp, FieldError, FormFieldWrapper } from './InlineHelp';
+export { TermsAndConditions, validateTermsAndConditions, TERMS_REQUIRED_FIELDS } from './TermsAndConditions';

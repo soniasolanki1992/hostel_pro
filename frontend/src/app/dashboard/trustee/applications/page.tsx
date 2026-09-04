@@ -10,24 +10,23 @@ import type { TableColumn } from '@/components/types';
 import { cn } from '@/components/utils';
 import {
   ApplicationReviewModal,
-  InterviewScheduleModal,
   type Application,
   type ApplicationStatus,
   type Vertical,
 } from '../_components';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { EmergencyInfoModal } from '@/components/EmergencyInfoModal';
 
 export default function TrusteeApplications() {
   const { t } = useLanguage();
-  const [selectedStatus, setSelectedStatus] = useState<'PENDING' | 'ALL' | 'TRUSTEE_REVIEW' | 'TRUSTEE_INTERVIEW' | 'APPROVED' | 'REJECTED'>('PENDING');
+  const [selectedStatus, setSelectedStatus] = useState<'PENDING' | 'ALL' | 'TRUSTEE_REVIEW' | 'TRUSTEE_FINAL_REVIEW' | 'SHORTLISTED' | 'APPROVED' | 'REJECTED'>('PENDING');
   const [selectedVertical, setSelectedVertical] = useState<Vertical | 'ALL'>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [applications, setApplications] = useState<Application[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedApplication, setSelectedApplication] = useState<Application | null>(null);
-  const [showInterviewModal, setShowInterviewModal] = useState(false);
-  const [interviewApplication, setInterviewApplication] = useState<Application | null>(null);
+  const [emergencyApp, setEmergencyApp] = useState<Application | null>(null);
 
   const fetchApplications = useCallback(async () => {
     try {
@@ -70,7 +69,7 @@ export default function TrusteeApplications() {
             ? new Date(app.createdAt).toLocaleDateString('en-GB')
             : new Date().toLocaleDateString('en-GB'),
           paymentStatus: app.paymentStatus || 'PAID',
-          interviewScheduled: status === 'TRUSTEE_INTERVIEW',
+          interviewScheduled: false,
           flags: app.flags || [],
           forwardedBy: (app.remarks || app.data?.status_remarks || app.forwarded_by)
             ? {
@@ -85,20 +84,7 @@ export default function TrusteeApplications() {
                 remarks: app.remarks || app.data?.status_remarks || '',
               }
             : undefined,
-          interview:
-            status === 'TRUSTEE_INTERVIEW'
-              ? {
-                  id: app.data?.interview?.id || app.id || '',
-                  scheduledDate: app.interview_scheduled_at
-                    ? new Date(app.interview_scheduled_at).toLocaleDateString('en-GB')
-                    : 'Not scheduled',
-                  scheduledTime: app.interview_scheduled_at
-                    ? new Date(app.interview_scheduled_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
-                    : 'TBD',
-                  mode: (app.data?.interview?.mode || 'IN_PERSON') as 'ONLINE' | 'PHYSICAL',
-                  status: 'SCHEDULED' as const,
-                }
-              : undefined,
+          interview: undefined,
         };
       });
 
@@ -118,7 +104,7 @@ export default function TrusteeApplications() {
     const matchesStatus =
       selectedStatus === 'ALL' ||
       (selectedStatus === 'PENDING'
-        ? app.status === 'TRUSTEE_REVIEW' || app.status === 'TRUSTEE_INTERVIEW'
+        ? app.status === 'TRUSTEE_REVIEW' || app.status === 'TRUSTEE_FINAL_REVIEW'
         : app.status === selectedStatus);
     const matchesVertical = selectedVertical === 'ALL' || app.vertical === selectedVertical;
     const matchesSearch =
@@ -131,9 +117,11 @@ export default function TrusteeApplications() {
     DRAFT: 'Draft',
     SUBMITTED: 'Submitted',
     REVIEW: 'Under Review',
-    INTERVIEW: 'Interview',
-    TRUSTEE_REVIEW: 'Trustee Review',
-    TRUSTEE_INTERVIEW: 'Trustee Interview',
+    TRUSTEE_REVIEW: 'Pending Trustee Review',
+    SHORTLISTED: 'Shortlisted',
+    INTERVIEW: 'Interview Scheduled',
+    TRUSTEE_FINAL_REVIEW: 'Pending Trustee Final Review',
+    WAITLIST: 'Waitlisted',
     APPROVED: 'Approved',
     REJECTED: 'Rejected',
     WITHDRAWN: 'Withdrawn',
@@ -142,8 +130,10 @@ export default function TrusteeApplications() {
 
   const getStatusVariant = (status: ApplicationStatus): BadgeVariant => {
     switch (status) {
-      case 'TRUSTEE_REVIEW': return 'info';
-      case 'TRUSTEE_INTERVIEW': return 'warning';
+      case 'TRUSTEE_REVIEW':
+      case 'TRUSTEE_FINAL_REVIEW': return 'info';
+      case 'SHORTLISTED': return 'warning';
+      case 'WAITLIST': return 'warning';
       case 'APPROVED': return 'success';
       case 'REJECTED':
       case 'WITHDRAWN': return 'error';
@@ -151,35 +141,54 @@ export default function TrusteeApplications() {
     }
   };
 
-  const handleProvisionalReject = async (applicationId: string, remarks: string) => {
+  const handleShortlist = async (applicationId: string, remarks: string) => {
     const token = localStorage.getItem('authToken');
     const response = await fetch(`/api/applications/${applicationId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', ...(token ? { 'Authorization': `Bearer ${token}` } : {}) },
       body: JSON.stringify({
-        status: 'REJECTED',
-        current_status: 'REJECTED',
+        status: 'SHORTLISTED',
+        current_status: 'SHORTLISTED',
         remarks,
       }),
     });
     if (response.ok) {
       await fetchApplications();
     } else {
-      throw new Error('Failed to reject application');
+      throw new Error('Failed to shortlist application');
     }
   };
 
   const handleFinalApprove = async (applicationId: string, remarks: string) => {
     const token = localStorage.getItem('authToken');
-    const response = await fetch(`/api/applications/${applicationId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', ...(token ? { 'Authorization': `Bearer ${token}` } : {}) },
-      body: JSON.stringify({
-        status: 'APPROVED',
-        current_status: 'APPROVED',
-        remarks,
-      }),
-    });
+    const headers = { 'Content-Type': 'application/json', ...(token ? { 'Authorization': `Bearer ${token}` } : {}) };
+
+    const submit = async (overrides: Record<string, any>) => {
+      return fetch(`/api/applications/${applicationId}`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({ status: 'APPROVED', current_status: 'APPROVED', remarks, ...overrides }),
+      });
+    };
+
+    let response = await submit({});
+
+    if (response.status === 409) {
+      const data = await response.json().catch(() => ({}));
+      if (data?.details?.suggested_status === 'WAITLIST') {
+        const moveToWaitlist = window.confirm(
+          'No rooms are currently available in this vertical.\n\n' +
+          'Click OK to move this applicant to the WAITLIST.\n' +
+          'Click Cancel to approve anyway (override room check).'
+        );
+        if (moveToWaitlist) {
+          response = await submit({ status: 'WAITLIST', current_status: 'WAITLIST' });
+        } else {
+          response = await submit({ force: true });
+        }
+      }
+    }
+
     if (response.ok) {
       await fetchApplications();
     } else {
@@ -202,42 +211,6 @@ export default function TrusteeApplications() {
       await fetchApplications();
     } else {
       throw new Error('Failed to reject application');
-    }
-  };
-
-  const handleScheduleInterview = async (data: {
-    applicationId: string;
-    date: string;
-    time: string;
-    mode: 'ONLINE' | 'PHYSICAL';
-    sendInvitation: boolean;
-    sendReminder: boolean;
-  }) => {
-    const token = localStorage.getItem('authToken');
-    const response = await fetch('/api/interviews', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(token ? { 'Authorization': `Bearer ${token}` } : {}) },
-      body: JSON.stringify({
-        application_id: data.applicationId,
-        schedule_time: `${data.date}T${data.time}:00Z`,
-        mode: data.mode,
-        send_invitation: data.sendInvitation,
-        send_reminder: data.sendReminder,
-      }),
-    });
-
-    if (response.ok) {
-      await fetch(`/api/applications/${data.applicationId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', ...(token ? { 'Authorization': `Bearer ${token}` } : {}) },
-        body: JSON.stringify({
-          status: 'TRUSTEE_INTERVIEW',
-          current_status: 'TRUSTEE_INTERVIEW',
-        }),
-      });
-      await fetchApplications();
-    } else {
-      throw new Error('Failed to schedule interview');
     }
   };
 
@@ -283,15 +256,12 @@ export default function TrusteeApplications() {
     },
     {
       key: 'interviewScheduled',
-      header: 'Interview',
+      header: 'Stage',
       render: (_: boolean, row: Application) => {
-        if (row.status === 'TRUSTEE_INTERVIEW') {
-          return <Badge variant="success" size="sm" rounded={true}>Scheduled</Badge>;
-        }
-        if (row.status === 'APPROVED' || row.status === 'REJECTED') {
-          return <Badge variant="default" size="sm" rounded={true}>-</Badge>;
-        }
-        return <Badge variant="default" size="sm" rounded={true}>N/A</Badge>;
+        if (row.status === 'TRUSTEE_REVIEW') return <Badge variant="info" size="sm" rounded={true}>Initial</Badge>;
+        if (row.status === 'TRUSTEE_FINAL_REVIEW') return <Badge variant="warning" size="sm" rounded={true}>Final</Badge>;
+        if (row.status === 'SHORTLISTED') return <Badge variant="default" size="sm" rounded={true}>Shortlisted</Badge>;
+        return <Badge variant="default" size="sm" rounded={true}>-</Badge>;
       },
     },
     {
@@ -313,9 +283,20 @@ export default function TrusteeApplications() {
       key: 'actions',
       header: 'Actions',
       render: (_: any, row: Application) => (
-        <Button variant="primary" size="sm" onClick={() => setSelectedApplication(row)}>
-          Review
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="primary" size="sm" onClick={() => setSelectedApplication(row)}>
+            Review
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={(e: any) => { e?.stopPropagation?.(); setEmergencyApp(row); }}
+            style={{ background: '#dc2626', borderColor: '#dc2626' }}
+            aria-label={`Emergency info for ${row.applicantName}`}
+          >
+            🚨 Emergency
+          </Button>
+        </div>
       ),
     },
   ];
@@ -370,8 +351,9 @@ export default function TrusteeApplications() {
             </label>
             {([
               { value: 'PENDING', label: 'Pending Action' },
-              { value: 'TRUSTEE_REVIEW', label: 'Trustee Review' },
-              { value: 'TRUSTEE_INTERVIEW', label: 'Trustee Interview' },
+              { value: 'TRUSTEE_REVIEW', label: 'Initial Review' },
+              { value: 'TRUSTEE_FINAL_REVIEW', label: 'Final Review' },
+              { value: 'SHORTLISTED', label: 'Shortlisted' },
               { value: 'APPROVED', label: 'Approved' },
               { value: 'REJECTED', label: 'Rejected' },
               { value: 'ALL', label: 'All' },
@@ -466,30 +448,23 @@ export default function TrusteeApplications() {
         />
       )}
 
+      {/* Emergency Info Modal */}
+      {emergencyApp && (
+        <EmergencyInfoModal
+          applicationId={emergencyApp.id}
+          studentName={emergencyApp.applicantName}
+          onClose={() => setEmergencyApp(null)}
+        />
+      )}
+
       {/* Application Review Modal */}
       <ApplicationReviewModal
         isOpen={selectedApplication !== null}
         onClose={() => setSelectedApplication(null)}
         application={selectedApplication}
-        onProvisionalReject={handleProvisionalReject}
+        onShortlist={handleShortlist}
         onFinalApprove={handleFinalApprove}
         onFinalReject={handleFinalReject}
-        onScheduleInterview={(app) => {
-          setInterviewApplication(app);
-          setShowInterviewModal(true);
-          setSelectedApplication(null);
-        }}
-      />
-
-      {/* Interview Schedule Modal */}
-      <InterviewScheduleModal
-        isOpen={showInterviewModal}
-        onClose={() => {
-          setShowInterviewModal(false);
-          setInterviewApplication(null);
-        }}
-        application={interviewApplication}
-        onSchedule={handleScheduleInterview}
       />
     </div>
   );

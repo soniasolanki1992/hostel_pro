@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import { comparePassword, createSession, createAuditLog } from '@/lib/auth';
+import { comparePassword, createSession, createAuditLog, isKnownSeedHash } from '@/lib/auth';
 import {
   successResponse,
   unauthorizedResponse,
@@ -91,6 +91,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // S-04: in production, refuse logins for accounts whose password_hash
+    // matches a published seed hash. Operators must rotate these via the
+    // admin reset-password flow before the account can be used.
+    if (
+      process.env.NODE_ENV === 'production' &&
+      isKnownSeedHash(user.password_hash)
+    ) {
+      logger.error('Refused login for seed-hash account', {
+        userId: user.id,
+        email: user.email,
+      });
+      return unauthorizedResponse(
+        'Account password must be rotated by an administrator before first use.'
+      );
+    }
+
     // Verify password using bcrypt
     const isPasswordValid = await comparePassword(password, user.password_hash);
 
@@ -134,7 +150,17 @@ export async function POST(request: NextRequest) {
         : 'Login successful',
     };
 
-    return successResponse(response);
+    // S-08: also set an HttpOnly cookie alongside the response body so
+    // dashboards can migrate away from localStorage at their own pace.
+    const res = successResponse(response);
+    res.cookies.set('auth_token', accessToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      path: '/',
+      maxAge: 2 * 60 * 60, // matches JWT_EXPIRES_IN
+    });
+    return res;
   } catch (error: any) {
     logger.error('Login failed', { route: '/api/auth/login', error: error.message });
     return serverErrorResponse('Login failed', error);

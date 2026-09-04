@@ -51,6 +51,18 @@ interface Notification {
   type: string;
 }
 
+interface Roommate {
+  id: string;
+  name: string;
+  mobile: string;
+}
+
+interface RoommatesData {
+  room: { roomNumber: string; vertical?: string; floor?: number; building?: string } | null;
+  roommates: Roommate[];
+  message?: string;
+}
+
 // Helper to format student data
 const formatStudent = (student: Partial<StudentData> & Record<string, unknown>): StudentData => ({
   id: student.id || '',
@@ -86,6 +98,8 @@ export default function ParentDashboard() {
   });
   const [feeItems, setFeeItems] = useState<FeeItem[]>([]);
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
+  const [roommatesData, setRoommatesData] = useState<RoommatesData>({ room: null, roommates: [] });
+  const [roommatesLoading, setRoommatesLoading] = useState(false);
 
   // Current student data (derived from selection)
   const studentData = allStudents[selectedStudentIndex] || {
@@ -182,6 +196,24 @@ export default function ParentDashboard() {
         const leaveResult = await leaveResponse.json();
         if (leaveResult.success && leaveResult.data) {
           setLeaveRequests(leaveResult.data.items || []);
+        }
+
+        // Fetch roommates for the selected student
+        setRoommatesLoading(true);
+        try {
+          const mateResponse = await fetch(`/api/parent/roommates?sessionToken=${encodeURIComponent(sessionToken)}&studentId=${encodeURIComponent(currentStudent.id)}`);
+          const mateResult = await mateResponse.json();
+          if (mateResponse.ok && mateResult.success && mateResult.data) {
+            setRoommatesData({
+              room: mateResult.data.room,
+              roommates: mateResult.data.roommates || [],
+              message: mateResult.message,
+            });
+          } else {
+            setRoommatesData({ room: null, roommates: [], message: mateResult.message });
+          }
+        } finally {
+          setRoommatesLoading(false);
         }
       } catch (err) {
         console.error('Error fetching additional data:', err);
@@ -401,6 +433,61 @@ export default function ParentDashboard() {
                 </div>
               </div>
             </div>
+          </Card>
+
+          {/* Roommates Section */}
+          <Card className="p-6 mb-6" role="region" aria-labelledby="roommates-heading">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <h3 id="roommates-heading" className="text-xl font-semibold text-gray-900">
+                  {t('Roommates', 'रूममेट्स')}
+                </h3>
+                {roommatesData.room?.roomNumber && (
+                  <span className="text-sm text-gray-500">
+                    {t('Room', 'कमरा')} {roommatesData.room.roomNumber}
+                    {roommatesData.room.floor != null && ` · ${t('Floor', 'मंज़िल')} ${roommatesData.room.floor}`}
+                    {roommatesData.room.building && ` · ${roommatesData.room.building}`}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {roommatesLoading ? (
+              <p className="text-sm text-gray-500">{t('Loading roommates...', 'रूममेट्स लोड हो रहे हैं...')}</p>
+            ) : !roommatesData.room ? (
+              <p className="text-sm text-gray-500">
+                {t('Room not allocated yet. Roommate information will appear once your ward is checked in.', 'अभी कमरा आवंटित नहीं हुआ है। चेक-इन के बाद रूममेट जानकारी दिखाई देगी।')}
+              </p>
+            ) : roommatesData.roommates.length === 0 ? (
+              <p className="text-sm text-gray-500">
+                {t('Currently no other roommates allocated to this room.', 'इस कमरे में फिलहाल कोई अन्य रूममेट आवंटित नहीं है।')}
+              </p>
+            ) : (
+              <div className="overflow-x-auto" role="region" aria-label="Roommates list">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-gray-200">
+                      <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wide py-3 px-4">{t('Name', 'नाम')}</th>
+                      <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wide py-3 px-4">{t('Mobile', 'मोबाइल')}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {roommatesData.roommates.map((mate) => (
+                      <tr key={mate.id} className="border-b border-gray-100 hover:bg-gray-50">
+                        <td className="py-3 px-4">
+                          <p className="text-sm font-medium text-gray-900">{mate.name}</p>
+                        </td>
+                        <td className="py-3 px-4">
+                          <a href={`tel:${mate.mobile}`} className="text-sm text-blue-600 hover:underline">
+                            {mate.mobile}
+                          </a>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </Card>
 
           {/* Fee Status Section */}

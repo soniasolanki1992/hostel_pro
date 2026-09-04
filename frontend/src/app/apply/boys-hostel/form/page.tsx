@@ -1,17 +1,56 @@
 'use client';
 
-import { FormWizard, Input, Select, DatePicker, FileUpload, Textarea, Checkbox } from '@/components/forms';
+import { FormWizard, Input, Select, DatePicker, FileUpload, MultiFileUpload, Textarea, Checkbox, TermsAndConditions, validateTermsAndConditions } from '@/components/forms';
 import { Button } from '@/components/shadcn/button-extended';
 import { ArrowLeft, Save, FileText, User, GraduationCap, Home, Users, Upload, CheckCircle } from 'lucide-react';
 import Link from 'next/link';
-import { useState, useEffect } from 'react';
+import { Suspense, useState, useEffect } from 'react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { LanguageToggle } from '@/components/LanguageToggle';
+import { AdmissionsGate } from '@/components/AdmissionsGate';
+import { AdmissionFeeStep } from '@/components/forms/AdmissionFeeStep';
+import { useRouter, useSearchParams } from 'next/navigation';
 
-export default function ApplicationFormPage() {
+export default function ApplicationFormPageWrapper() {
+  return (
+    <Suspense fallback={null}>
+      <ApplicationFormPage />
+    </Suspense>
+  );
+}
+
+function ApplicationFormPage() {
   const { t } = useLanguage();
   const [isLoading, setIsLoading] = useState(true);
   const [initialData, setInitialData] = useState<any>({});
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const [pendingApplicationId, setPendingApplicationId] = useState<string | null>(null);
+  const [pendingTrackingNumber, setPendingTrackingNumber] = useState<string | null>(null);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const appId = searchParams.get('appId');
+    const tracking = searchParams.get('tracking');
+    if (!appId || !tracking) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/applications/track/${tracking}`);
+        const json = await res.json();
+        const app = json?.data?.data || json?.data;
+        if (!cancelled && app && app.id === appId && app.current_status === 'DRAFT' && app.vertical === 'BOYS_HOSTEL') {
+          setPendingApplicationId(appId);
+          setPendingTrackingNumber(tracking);
+        }
+      } catch {
+        // ignore — show full form
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [searchParams]);
 
   useEffect(() => {
     const loadDraft = async () => {
@@ -26,7 +65,14 @@ export default function ApplicationFormPage() {
           vertical: 'boys-hostel',
         };
         if (savedDraft) {
-          setInitialData({ ...JSON.parse(savedDraft), ...contactDefaults });
+          const draft = JSON.parse(savedDraft);
+          // Saved draft wins; contactDefaults only fills missing fields.
+          setInitialData({
+            ...contactDefaults,
+            ...draft,
+            applicantMobile: draft.applicantMobile || contactDefaults.applicantMobile,
+            applicantEmail: draft.applicantEmail || contactDefaults.applicantEmail,
+          });
         } else {
           setInitialData(contactDefaults);
         }
@@ -131,7 +177,7 @@ export default function ApplicationFormPage() {
               onChange={(e) => onChange('dob', e.target.value)}
               error={errors.dob}
               required
-              helperText={t('You must be at least 18 years old', 'आपकी आयु कम से कम 18 वर्ष होनी चाहिए')}
+              helperText={t('You must be at least 15 years old', 'आपकी आयु कम से कम 15 वर्ष होनी चाहिए')}
             />
 
             <Input
@@ -229,34 +275,46 @@ export default function ApplicationFormPage() {
                 placeholder={t('Enter father\'s full name', 'पिता का पूरा नाम दर्ज करें')}
               />
 
-              <Input
-                label={t('Father\'s Occupation', 'पिता का व्यवसाय')}
-                value={data.fatherOccupation || ''}
-                onChange={(e) => onChange('fatherOccupation', e.target.value)}
-                placeholder={t('Enter father\'s occupation', 'पिता का व्यवसाय दर्ज करें')}
+              <Checkbox
+                checked={data.fatherDeceased === true}
+                onChange={(e) => onChange('fatherDeceased', e.target.checked)}
+                label={t('Father is deceased / not alive', 'पिता का देहांत हो चुका है / जीवित नहीं हैं')}
               />
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Input
-                  label={t('Father\'s Mobile Number', 'पिता का मोबाइल नंबर')}
-                  type="tel"
-                  value={data.fatherMobile || ''}
-                  onChange={(e) => onChange('fatherMobile', e.target.value)}
-                  error={errors.fatherMobile}
-                  required
-                  placeholder={t('10-digit mobile number', '10 अंकों का मोबाइल नंबर')}
-                  maxLength={10}
-                  inputMode="tel"
-                />
+              {!data.fatherDeceased && (
+                <>
+                  <Input
+                    label={t('Father\'s Occupation', 'पिता का व्यवसाय')}
+                    value={data.fatherOccupation || ''}
+                    onChange={(e) => onChange('fatherOccupation', e.target.value)}
+                    error={errors.fatherOccupation}
+                    required
+                    placeholder={t('Enter father\'s occupation', 'पिता का व्यवसाय दर्ज करें')}
+                  />
 
-                <Input
-                  label={t('Father\'s Email', 'पिता का ईमेल')}
-                  type="email"
-                  value={data.fatherEmail || ''}
-                  onChange={(e) => onChange('fatherEmail', e.target.value)}
-                  placeholder={t('Enter email (optional)', 'ईमेल दर्ज करें (वैकल्पिक)')}
-                />
-              </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <Input
+                      label={t('Father\'s Mobile Number', 'पिता का मोबाइल नंबर')}
+                      type="tel"
+                      value={data.fatherMobile || ''}
+                      onChange={(e) => onChange('fatherMobile', e.target.value)}
+                      error={errors.fatherMobile}
+                      required
+                      placeholder={t('10-digit mobile number', '10 अंकों का मोबाइल नंबर')}
+                      maxLength={10}
+                      inputMode="tel"
+                    />
+
+                    <Input
+                      label={t('Father\'s Email', 'पिता का ईमेल')}
+                      type="email"
+                      value={data.fatherEmail || ''}
+                      onChange={(e) => onChange('fatherEmail', e.target.value)}
+                      placeholder={t('Enter email (optional)', 'ईमेल दर्ज करें (वैकल्पिक)')}
+                    />
+                  </div>
+                </>
+              )}
 
               <Input
                 label={t('Mother\'s Name', 'माता का नाम')}
@@ -267,44 +325,60 @@ export default function ApplicationFormPage() {
                 placeholder={t('Enter mother\'s full name', 'माता का पूरा नाम दर्ज करें')}
               />
 
-              <Input
-                label={t('Mother\'s Occupation', 'माता का व्यवसाय')}
-                value={data.motherOccupation || ''}
-                onChange={(e) => onChange('motherOccupation', e.target.value)}
-                placeholder={t('Enter mother\'s occupation', 'माता का व्यवसाय दर्ज करें')}
+              <Checkbox
+                checked={data.motherDeceased === true}
+                onChange={(e) => onChange('motherDeceased', e.target.checked)}
+                label={t('Mother is deceased / not alive', 'माता का देहांत हो चुका है / जीवित नहीं हैं')}
               />
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Input
-                  label={t('Mother\'s Mobile Number', 'माता का मोबाइल नंबर')}
-                  type="tel"
-                  value={data.motherMobile || ''}
-                  onChange={(e) => onChange('motherMobile', e.target.value)}
-                  placeholder={t('10-digit mobile number (optional)', '10 अंकों का मोबाइल नंबर (वैकल्पिक)')}
-                  maxLength={10}
-                  inputMode="tel"
-                />
+              {!data.motherDeceased && (
+                <>
+                  <Input
+                    label={t('Mother\'s Occupation', 'माता का व्यवसाय')}
+                    value={data.motherOccupation || ''}
+                    onChange={(e) => onChange('motherOccupation', e.target.value)}
+                    error={errors.motherOccupation}
+                    required
+                    placeholder={t('Enter mother\'s occupation', 'माता का व्यवसाय दर्ज करें')}
+                  />
 
-                <Input
-                  label={t('Mother\'s Email', 'माता का ईमेल')}
-                  type="email"
-                  value={data.motherEmail || ''}
-                  onChange={(e) => onChange('motherEmail', e.target.value)}
-                  placeholder={t('Enter email (optional)', 'ईमेल दर्ज करें (वैकल्पिक)')}
-                />
-              </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <Input
+                      label={t('Mother\'s Mobile Number', 'माता का मोबाइल नंबर')}
+                      type="tel"
+                      value={data.motherMobile || ''}
+                      onChange={(e) => onChange('motherMobile', e.target.value)}
+                      error={errors.motherMobile}
+                      required
+                      placeholder={t('10-digit mobile number', '10 अंकों का मोबाइल नंबर')}
+                      maxLength={10}
+                      inputMode="tel"
+                    />
+
+                    <Input
+                      label={t('Mother\'s Email', 'माता का ईमेल')}
+                      type="email"
+                      value={data.motherEmail || ''}
+                      onChange={(e) => onChange('motherEmail', e.target.value)}
+                      placeholder={t('Enter email (optional)', 'ईमेल दर्ज करें (वैकल्पिक)')}
+                    />
+                  </div>
+                </>
+              )}
             </div>
           </div>
 
           <div>
             <h3 className="text-lg font-semibold mb-4" style={{ color: 'var(--text-primary)' }}>
-              {t('Local Guardian (if different from parents)', 'स्थानीय अभिभावक (यदि माता-पिता से भिन्न)')}</h3>
+              {t('Local Guardian (must differ from parents — local applicants are not eligible)', 'स्थानीय अभिभावक (माता-पिता से भिन्न होना चाहिए — स्थानीय आवेदक पात्र नहीं हैं)')}</h3>
             <div className="space-y-4">
               <Input
                 label={t('Guardian Name', 'अभिभावक का नाम')}
                 value={data.guardianName || ''}
                 onChange={(e) => onChange('guardianName', e.target.value)}
-                placeholder={t('Enter local guardian\'s name (optional)', 'स्थानीय अभिभावक का नाम दर्ज करें (वैकल्पिक)')}
+                error={errors.guardianName}
+                required
+                placeholder={t('Enter local guardian\'s name', 'स्थानीय अभिभावक का नाम दर्ज करें')}
               />
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -312,6 +386,8 @@ export default function ApplicationFormPage() {
                   label={t('Relationship', 'संबंध')}
                   value={data.guardianRelationship || ''}
                   onChange={(e) => onChange('guardianRelationship', e.target.value)}
+                  error={errors.guardianRelationship}
+                  required
                   placeholder={t('e.g., Uncle, Family Friend', 'जैसे, चाचा, पारिवारिक मित्र')}
                 />
 
@@ -320,6 +396,8 @@ export default function ApplicationFormPage() {
                   type="tel"
                   value={data.guardianMobile || ''}
                   onChange={(e) => onChange('guardianMobile', e.target.value)}
+                  error={errors.guardianMobile}
+                  required
                   placeholder={t('10-digit mobile number', '10 अंकों का मोबाइल नंबर')}
                   maxLength={10}
                   inputMode="tel"
@@ -389,7 +467,7 @@ export default function ApplicationFormPage() {
           let age = today.getFullYear() - dob.getFullYear();
           const monthDiff = today.getMonth() - dob.getMonth();
           if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < dob.getDate())) age--;
-          if (age < 18) errors.dob = 'Applicant must be at least 18 years old';
+          if (age < 15) errors.dob = 'Applicant must be at least 15 years old';
         }
         if (!data.gender) errors.gender = 'Gender is required';
         if (!data.bloodGroup) errors.bloodGroup = 'Blood group is required';
@@ -400,13 +478,36 @@ export default function ApplicationFormPage() {
           errors.pinCode = 'Valid 6-digit PIN code is required';
         }
         if (!data.fatherName?.trim()) errors.fatherName = 'Father name is required';
-        if (!data.fatherMobile?.trim() || !/^\d{10}$/.test(data.fatherMobile)) {
-          errors.fatherMobile = 'Valid 10-digit mobile number is required';
+        if (!data.fatherDeceased) {
+          if (!data.fatherOccupation?.trim()) errors.fatherOccupation = 'Father occupation is required';
+          if (!data.fatherMobile?.trim() || !/^\d{10}$/.test(data.fatherMobile)) {
+            errors.fatherMobile = 'Valid 10-digit mobile number is required';
+          }
         }
         if (!data.motherName?.trim()) errors.motherName = 'Mother name is required';
+        if (!data.motherDeceased) {
+          if (!data.motherOccupation?.trim()) errors.motherOccupation = 'Mother occupation is required';
+          if (!data.motherMobile?.trim() || !/^\d{10}$/.test(data.motherMobile)) {
+            errors.motherMobile = 'Valid 10-digit mobile number is required';
+          }
+        }
+        if (!data.guardianName?.trim()) errors.guardianName = 'Local guardian name is required';
+        if (!data.guardianRelationship?.trim()) errors.guardianRelationship = 'Relationship is required';
+        if (!data.guardianMobile?.trim() || !/^\d{10}$/.test(data.guardianMobile)) {
+          errors.guardianMobile = 'Valid 10-digit guardian mobile is required';
+        } else if ((!data.fatherDeceased && data.fatherMobile && data.guardianMobile === data.fatherMobile) || (!data.motherDeceased && data.motherMobile && data.guardianMobile === data.motherMobile)) {
+          errors.guardianMobile = 'Local guardian must differ from parents — local applicants are not eligible';
+        }
+        if (data.guardianName?.trim() && (data.guardianName.trim().toLowerCase() === data.fatherName?.trim().toLowerCase() || data.guardianName.trim().toLowerCase() === data.motherName?.trim().toLowerCase())) {
+          errors.guardianName = 'Local guardian must differ from parents';
+        }
         if (!data.emergencyContactPerson?.trim()) errors.emergencyContactPerson = 'Emergency contact person is required';
         if (!data.emergencyMobile?.trim() || !/^\d{10}$/.test(data.emergencyMobile)) {
           errors.emergencyMobile = 'Valid 10-digit emergency mobile is required';
+        } else if (data.guardianMobile && data.emergencyMobile === data.guardianMobile) {
+          errors.emergencyMobile = 'Emergency mobile must differ from local guardian mobile';
+        } else if ((!data.fatherDeceased && data.fatherMobile && data.emergencyMobile === data.fatherMobile) || (!data.motherDeceased && data.motherMobile && data.emergencyMobile === data.motherMobile)) {
+          errors.emergencyMobile = 'Emergency mobile must differ from parent mobile';
         }
         if (!data.emergencyRelationship?.trim()) errors.emergencyRelationship = 'Relationship is required';
         return Object.keys(errors).length > 0 ? errors : null;
@@ -448,21 +549,30 @@ export default function ApplicationFormPage() {
               placeholder="e.g., B.Com, B.Sc, B.Tech"
             />
 
+            <Select
+              label={t('Year/Semester', 'वर्ष/सेमेस्टर')}
+              value={data.year || ''}
+              onChange={(e) => onChange('year', e.target.value)}
+              error={errors.year}
+              required
+              options={[
+                { value: '', label: 'Select Year' },
+                { value: '1', label: '1st Year' },
+                { value: '2', label: '2nd Year' },
+                { value: '3', label: '3rd Year' },
+                { value: '4', label: '4th Year' },
+                { value: '5', label: '5th Year' },
+              ]}
+            />
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Select
-                label={t('Year/Semester', 'वर्ष/सेमेस्टर')}
-                value={data.year || ''}
-                onChange={(e) => onChange('year', e.target.value)}
-                error={errors.year}
+              <Input
+                label={t('Previous Academic Qualification', 'पिछली शैक्षणिक योग्यता')}
+                value={data.qualification || ''}
+                onChange={(e) => onChange('qualification', e.target.value)}
+                error={errors.qualification}
                 required
-                options={[
-                  { value: '', label: 'Select Year' },
-                  { value: '1', label: '1st Year' },
-                  { value: '2', label: '2nd Year' },
-                  { value: '3', label: '3rd Year' },
-                  { value: '4', label: '4th Year' },
-                  { value: '5', label: '5th Year' },
-                ]}
+                placeholder="e.g., 12th (HSC), Diploma, etc."
               />
 
               <Input
@@ -475,15 +585,6 @@ export default function ApplicationFormPage() {
                 inputMode="decimal"
               />
             </div>
-
-            <Input
-              label={t('Previous Academic Qualification', 'पिछली शैक्षणिक योग्यता')}
-              value={data.qualification || ''}
-              onChange={(e) => onChange('qualification', e.target.value)}
-              error={errors.qualification}
-              required
-              placeholder="e.g., 12th (HSC), Diploma, etc."
-            />
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Input
@@ -556,26 +657,12 @@ export default function ApplicationFormPage() {
             />
 
             <Select
-              label={t('Preferred Room Type', 'पसंदीदा कमरे का प्रकार')}
-              value={data.roomType || ''}
-              onChange={(e) => onChange('roomType', e.target.value)}
-              error={errors.roomType}
-              required
-              helperText={t('Subject to availability', 'उपलब्धता के अधीन')}
-              options={[
-                { value: '', label: 'Select Room Type' },
-                { value: '2-sharing', label: '2-Sharing' },
-                { value: '3-sharing', label: '3-Sharing' },
-                { value: '4-sharing', label: '4-Sharing' },
-              ]}
-            />
-
-            <Select
               label={t('Duration of Stay', 'ठहरने की अवधि')}
               value={data.duration || ''}
               onChange={(e) => onChange('duration', e.target.value)}
               error={errors.duration}
               required
+              helperText={t('Maximum 5 years', 'अधिकतम 5 वर्ष')}
               options={[
                 { value: '', label: 'Select Duration' },
                 { value: '6-months', label: '6 Months' },
@@ -583,6 +670,7 @@ export default function ApplicationFormPage() {
                 { value: '2-years', label: '2 Years' },
                 { value: '3-years', label: '3 Years' },
                 { value: '4-years', label: '4 Years' },
+                { value: '5-years', label: '5 Years' },
               ]}
             />
 
@@ -592,25 +680,32 @@ export default function ApplicationFormPage() {
               onChange={(e) => onChange('joiningDate', e.target.value)}
               error={errors.joiningDate}
               required
-              helperText={t('Expected date of admission', 'प्रवेश की अपेक्षित तिथि')}
+              min={new Date().toISOString().split('T')[0]}
+              max={(() => { const d = new Date(); d.setFullYear(d.getFullYear() + 1); return d.toISOString().split('T')[0]; })()}
+              helperText={t('Expected date of admission (within 1 year)', 'प्रवेश की अपेक्षित तिथि (1 वर्ष के भीतर)')}
             />
 
-            <Textarea
-              label={t('Special Requirements (Optional)', 'विशेष आवश्यकताएं (वैकल्पिक)')}
-              value={data.specialRequirements || ''}
-              onChange={(e) => onChange('specialRequirements', e.target.value)}
-              placeholder="Any specific needs or requirements (e.g., medical conditions, dietary restrictions)"
-              rows={4}
-              helperText={t('Please mention any special needs or health conditions we should be aware of', 'कृपया किसी विशेष आवश्यकता या स्वास्थ्य स्थिति का उल्लेख करें')}
-            />
           </div>
         </div>
       ),
       validate: (data: any) => {
         const errors: any = {};
-        if (!data.roomType) errors.roomType = 'Room type is required';
         if (!data.duration) errors.duration = 'Duration is required';
-        if (!data.joiningDate) errors.joiningDate = 'Joining date is required';
+        if (!data.joiningDate) {
+          errors.joiningDate = 'Joining date is required';
+        } else {
+          const joining = new Date(data.joiningDate);
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          const maxDate = new Date();
+          maxDate.setFullYear(maxDate.getFullYear() + 1);
+          maxDate.setHours(0, 0, 0, 0);
+          if (joining < today) {
+            errors.joiningDate = 'Joining date cannot be in the past';
+          } else if (joining > maxDate) {
+            errors.joiningDate = 'Joining date cannot be more than 1 year from today';
+          }
+        }
         return Object.keys(errors).length > 0 ? errors : null;
       },
     },
@@ -640,8 +735,6 @@ export default function ApplicationFormPage() {
                   label={t('Ex-Student Name', 'पूर्व छात्र का नाम')}
                   value={data.ref1Name || ''}
                   onChange={(e) => onChange('ref1Name', e.target.value)}
-                  error={errors.ref1Name}
-                  required
                   placeholder={t('Enter full name of ex-student', 'पूर्व छात्र का पूरा नाम दर्ज करें')}
                 />
 
@@ -651,8 +744,6 @@ export default function ApplicationFormPage() {
                     type="tel"
                     value={data.ref1Mobile || ''}
                     onChange={(e) => onChange('ref1Mobile', e.target.value)}
-                    error={errors.ref1Mobile}
-                    required
                     placeholder={t('10-digit mobile number', '10 अंकों का मोबाइल नंबर')}
                     maxLength={10}
                     inputMode="tel"
@@ -662,8 +753,6 @@ export default function ApplicationFormPage() {
                     label={t('Year of Stay', 'ठहरने का वर्ष')}
                     value={data.ref1Year || ''}
                     onChange={(e) => onChange('ref1Year', e.target.value)}
-                    error={errors.ref1Year}
-                    required
                     placeholder="e.g., 2020-2023"
                   />
                 </div>
@@ -720,11 +809,12 @@ export default function ApplicationFormPage() {
       ),
       validate: (data: any) => {
         const errors: any = {};
-        if (!data.ref1Name?.trim()) errors.ref1Name = 'Ex-student name is required';
-        if (!data.ref1Mobile?.trim() || !/^\d{10}$/.test(data.ref1Mobile)) {
+        if (data.ref1Mobile?.trim() && !/^\d{10}$/.test(data.ref1Mobile)) {
           errors.ref1Mobile = 'Valid 10-digit mobile number is required';
         }
-        if (!data.ref1Year?.trim()) errors.ref1Year = 'Year of stay is required';
+        if (data.ref2Mobile?.trim() && !/^\d{10}$/.test(data.ref2Mobile)) {
+          errors.ref2Mobile = 'Valid 10-digit mobile number is required';
+        }
         return Object.keys(errors).length > 0 ? errors : null;
       },
     },
@@ -769,97 +859,237 @@ export default function ApplicationFormPage() {
             </ul>
           </div>
 
-          {/* Required Documents Checklist */}
-          <div className="card p-4 border-2" style={{ backgroundColor: 'var(--color-gray-50)', borderColor: 'var(--border-primary)' }}>
-            <h3 className="text-base font-semibold mb-3 flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-              <CheckCircle className="w-5 h-5" />
-              {t('Required Documents Checklist', 'आवश्यक दस्तावेज़ चेकलिस्ट')}
+          <Checkbox
+            checked={!!data.isCAStudent}
+            onChange={(e) => onChange('isCAStudent', e.target.checked)}
+            label={t('I am a CA student / doing Articleship or Internship', 'मैं CA छात्र हूं / आर्टिकलशिप या इंटर्नशिप कर रहा/रही हूं')}
+            helperText={t('Toggling this changes which documents are required (Bonafide ↔ CA Firm Letter, Fee Receipt ↔ Registration Letter 102-103)', 'इसे बदलने से आवश्यक दस्तावेज़ बदल जाते हैं')}
+          />
+
+          {/* In Original */}
+          <div>
+            <h3 className="text-lg font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>
+              {t('Documents in Original', 'मूल दस्तावेज़')}
             </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {[
-                { key: 'photoFile', label: t('Passport Size Photo', 'पासपोर्ट आकार का फोटो'), required: true },
-                { key: 'birthCertificate', label: t('Birth Certificate', 'जन्म प्रमाण पत्र'), required: true },
-                { key: 'marksheet', label: t('Educational Marksheet', 'शैक्षणिक अंकपत्र'), required: true },
-                { key: 'recommendationLetter', label: t('Recommendation Letter', 'अनुशंसा पत्र'), required: false },
-              ].map((doc) => {
-                const uploaded = !!data[doc.key];
-                return (
-                  <div key={doc.key} className="flex items-center gap-2 py-1.5 px-2 rounded" style={{ backgroundColor: uploaded ? 'var(--color-green-50, #f0fdf4)' : 'transparent' }}>
-                    <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold ${
-                      uploaded ? 'bg-green-200 text-green-800' : doc.required ? 'bg-red-100 text-red-600' : 'bg-gray-200 text-gray-500'
-                    }`}>
-                      {uploaded ? '✓' : doc.required ? '!' : '—'}
-                    </span>
-                    <span className="text-sm" style={{ color: 'var(--text-primary)' }}>
-                      {doc.label}
-                    </span>
-                    <span className={`text-xs px-1.5 py-0.5 rounded ${
-                      uploaded ? 'bg-green-100 text-green-700' : doc.required ? 'bg-red-50 text-red-600' : 'bg-gray-100 text-gray-500'
-                    }`}>
-                      {uploaded ? t('Uploaded', 'अपलोड') : doc.required ? t('Required', 'आवश्यक') : t('Optional', 'वैकल्पिक')}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="space-y-6">
-            <FileUpload
-              label={t('Recent Passport Size Photo', 'हालिया पासपोर्ट आकार का फोटो')}
-              value={data.photoFile || null}
-              onChange={(file) => onChange('photoFile', file)}
-              error={errors.photoFile}
-              required
-              accept=".jpg,.jpeg,.pdf"
-              maxSize={5 * 1024 * 1024}
-              showPreview={true}
-            />
-
-            <FileUpload
-              label={t('Birth Certificate', 'जन्म प्रमाण पत्र')}
-              value={data.birthCertificate || null}
-              onChange={(file) => onChange('birthCertificate', file)}
-              error={errors.birthCertificate}
-              required
-              accept=".jpg,.jpeg,.pdf"
-              maxSize={5 * 1024 * 1024}
-              showPreview={true}
-            />
-
-            <div className="card p-6 border-2" style={{ borderColor: 'var(--border-primary)' }}>
+            <div className="space-y-6">
               <FileUpload
-                label={t('Educational Marksheet/Certificate', 'शैक्षणिक अंकपत्र/प्रमाण पत्र')}
-                value={data.marksheet || null}
-                onChange={(file) => onChange('marksheet', file)}
-                error={errors.marksheet}
+                label={t('Caste Certificate (from native place — Digamber Jain Mandir)', 'जाति प्रमाण पत्र (मूल निवास से — दिगंबर जैन मंदिर)')}
+                value={data.casteCertificate || null}
+                onChange={(file) => onChange('casteCertificate', file)}
+                error={errors.casteCertificate}
                 required
                 accept=".jpg,.jpeg,.pdf"
                 maxSize={5 * 1024 * 1024}
-                showPreview={true}
+              />
+
+              {!data.isCAStudent ? (
+                <FileUpload
+                  label={t('Bonafide Certificate from College / Institute (Optional)', 'कॉलेज / संस्थान से बोनाफाइड प्रमाण पत्र (वैकल्पिक)')}
+                  value={data.bonafideCertificate || null}
+                  onChange={(file) => onChange('bonafideCertificate', file)}
+                  accept=".jpg,.jpeg,.pdf"
+                  maxSize={5 * 1024 * 1024}
+                />
+              ) : (
+                <FileUpload
+                  label={t('Firm Letter from Chartered Accountant (Articleship / Internship)', 'चार्टर्ड अकाउंटेंट का पत्र (आर्टिकलशिप / इंटर्नशिप)')}
+                  value={data.caFirmLetter || null}
+                  onChange={(file) => onChange('caFirmLetter', file)}
+                  error={errors.caFirmLetter}
+                  required
+                  accept=".jpg,.jpeg,.pdf"
+                  maxSize={5 * 1024 * 1024}
+                />
+              )}
+            </div>
+          </div>
+
+          {/* In Attested Copies */}
+          <div>
+            <h3 className="text-lg font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>
+              {t('Documents in Attested Copies', 'सत्यापित प्रतियों में दस्तावेज़')}
+            </h3>
+            <div className="space-y-6">
+              <FileUpload
+                label={t('Birth Certificate', 'जन्म प्रमाण पत्र')}
+                value={data.birthCertificate || null}
+                onChange={(file) => onChange('birthCertificate', file)}
+                error={errors.birthCertificate}
+                required
+                accept=".jpg,.jpeg,.pdf"
+                maxSize={5 * 1024 * 1024}
+              />
+
+              <FileUpload
+                label={t('Aadhaar Card / Voter ID Card', 'आधार कार्ड / मतदाता पहचान पत्र')}
+                value={data.aadhaarOrVoterId || null}
+                onChange={(file) => onChange('aadhaarOrVoterId', file)}
+                error={errors.aadhaarOrVoterId}
+                required
+                accept=".jpg,.jpeg,.pdf"
+                maxSize={5 * 1024 * 1024}
+              />
+
+              <FileUpload
+                label={t('Address Proof (Ration Card / Electricity Bill / Water Bill)', 'पता प्रमाण (राशन कार्ड / बिजली बिल / पानी का बिल)')}
+                value={data.addressProof || null}
+                onChange={(file) => onChange('addressProof', file)}
+                error={errors.addressProof}
+                required
+                accept=".jpg,.jpeg,.pdf"
+                maxSize={5 * 1024 * 1024}
+              />
+
+              <MultiFileUpload
+                label={t('Mark Sheets — last 4 examinations', 'अंक पत्र — पिछली 4 परीक्षाएं')}
+                value={Array.isArray(data.marksheets) ? data.marksheets : []}
+                onChange={(files) => onChange('marksheets', files)}
+                error={errors.marksheets}
+                required
+                accept=".jpg,.jpeg,.png,.pdf"
+                maxFiles={4}
+                maxSize={5 * 1024 * 1024}
+                helperText={t('Upload up to 4 mark sheets (last 4 examinations)', 'पिछली 4 परीक्षाओं के 4 अंक पत्र तक अपलोड करें')}
+              />
+
+              {!data.isCAStudent ? (
+                <FileUpload
+                  label={t('Fee Receipt of current academic year', 'चालू शैक्षणिक वर्ष की शुल्क रसीद')}
+                  value={data.feeReceipt || null}
+                  onChange={(file) => onChange('feeReceipt', file)}
+                  error={errors.feeReceipt}
+                  required
+                  accept=".jpg,.jpeg,.pdf"
+                  maxSize={5 * 1024 * 1024}
+                />
+              ) : (
+                <FileUpload
+                  label={t('Registration Letter from Institute (CA 102-103)', 'संस्थान से पंजीकरण पत्र (CA 102-103)')}
+                  value={data.registrationLetter || null}
+                  onChange={(file) => onChange('registrationLetter', file)}
+                  error={errors.registrationLetter}
+                  required
+                  accept=".jpg,.jpeg,.pdf"
+                  maxSize={5 * 1024 * 1024}
+                />
+              )}
+
+              <FileUpload
+                label={t('Local Guardian Aadhaar Card', 'स्थानीय अभिभावक का आधार कार्ड')}
+                value={data.guardianAadhaar || null}
+                onChange={(file) => onChange('guardianAadhaar', file)}
+                error={errors.guardianAadhaar}
+                required
+                accept=".jpg,.jpeg,.pdf"
+                maxSize={5 * 1024 * 1024}
+              />
+
+              <FileUpload
+                label={t('Medical Fitness Certificate (from MBBS Doctor)', 'चिकित्सा फिटनेस प्रमाण पत्र (MBBS डॉक्टर से)')}
+                value={data.medicalFitnessCertificate || null}
+                onChange={(file) => onChange('medicalFitnessCertificate', file)}
+                error={errors.medicalFitnessCertificate}
+                required
+                accept=".jpg,.jpeg,.pdf"
+                maxSize={5 * 1024 * 1024}
               />
             </div>
+          </div>
 
-            <div className="card p-6 border-2" style={{ borderColor: 'var(--border-primary)' }}>
+          {/* Additional photos & references */}
+          <div>
+            <h3 className="text-lg font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>
+              {t('Photographs & References', 'तस्वीरें और संदर्भ')}
+            </h3>
+            <div className="space-y-6">
+              <FileUpload
+                label={t('Recent Passport Size Photo', 'हालिया पासपोर्ट आकार का फोटो')}
+                value={data.photoFile || null}
+                onChange={(file) => onChange('photoFile', file)}
+                error={errors.photoFile}
+                required
+                accept=".jpg,.jpeg,.pdf"
+                maxSize={5 * 1024 * 1024}
+              />
+
+              {!data.fatherDeceased && (
+                <FileUpload
+                  label={t('Photo with Father', 'पिता के साथ फोटो')}
+                  value={data.photoWithFather || null}
+                  onChange={(file) => onChange('photoWithFather', file)}
+                  error={errors.photoWithFather}
+                  required
+                  accept=".jpg,.jpeg,.pdf"
+                  maxSize={5 * 1024 * 1024}
+                />
+              )}
+
+              {!data.motherDeceased && (
+                <FileUpload
+                  label={t('Photo with Mother', 'माता के साथ फोटो')}
+                  value={data.photoWithMother || null}
+                  onChange={(file) => onChange('photoWithMother', file)}
+                  error={errors.photoWithMother}
+                  required
+                  accept=".jpg,.jpeg,.pdf"
+                  maxSize={5 * 1024 * 1024}
+                />
+              )}
+
+              <FileUpload
+                label={t('Photo with Guardian', 'अभिभावक के साथ फोटो')}
+                value={data.photoWithGuardian || null}
+                onChange={(file) => onChange('photoWithGuardian', file)}
+                error={errors.photoWithGuardian}
+                required
+                accept=".jpg,.jpeg,.pdf"
+                maxSize={5 * 1024 * 1024}
+              />
+
               <FileUpload
                 label={t('Community Recommendation Letter (Optional)', 'सामुदायिक अनुशंसा पत्र (वैकल्पिक)')}
                 value={data.recommendationLetter || null}
                 onChange={(file) => onChange('recommendationLetter', file)}
                 accept=".jpg,.jpeg,.pdf"
                 maxSize={5 * 1024 * 1024}
-                showPreview={true}
               />
             </div>
           </div>
+
         </div>
       ),
       validate: (data: any) => {
         const errors: any = {};
-        if (!data.photoFile) errors.photoFile = 'Photo is required';
+        if (!data.casteCertificate) errors.casteCertificate = 'Caste certificate is required';
+        if (!data.isCAStudent) {
+          if (!data.feeReceipt) errors.feeReceipt = 'Fee receipt is required';
+        } else {
+          if (!data.caFirmLetter) errors.caFirmLetter = 'CA firm letter is required';
+          if (!data.registrationLetter) errors.registrationLetter = 'Registration letter (CA 102-103) is required';
+        }
         if (!data.birthCertificate) errors.birthCertificate = 'Birth certificate is required';
-        if (!data.marksheet) errors.marksheet = 'Marksheet is required';
+        if (!data.aadhaarOrVoterId) errors.aadhaarOrVoterId = 'Aadhaar / Voter ID is required';
+        if (!data.addressProof) errors.addressProof = 'Address proof is required';
+        if (!Array.isArray(data.marksheets) || data.marksheets.length < 1) {
+          errors.marksheets = 'At least one mark sheet is required (upload up to 4)';
+        }
+        if (!data.guardianAadhaar) errors.guardianAadhaar = 'Local guardian Aadhaar is required';
+        if (!data.medicalFitnessCertificate) errors.medicalFitnessCertificate = 'Medical fitness certificate is required';
+        if (!data.photoFile) errors.photoFile = 'Photo is required';
+        if (!data.fatherDeceased && !data.photoWithFather) errors.photoWithFather = 'Photo with father is required';
+        if (!data.motherDeceased && !data.photoWithMother) errors.photoWithMother = 'Photo with mother is required';
+        if (!data.photoWithGuardian) errors.photoWithGuardian = 'Photo with guardian is required';
         return Object.keys(errors).length > 0 ? errors : null;
       },
+    },
+    {
+      id: 'terms',
+      title: 'Rules & Conditions',
+      description: 'Read rules and accept conditions',
+      component: ({ data, onChange, errors }: any) => (
+        <TermsAndConditions data={data} onChange={onChange} errors={errors} vertical="boys-hostel" />
+      ),
+      validate: (data: any) => validateTermsAndConditions(data),
     },
     {
       id: 'review',
@@ -890,8 +1120,8 @@ export default function ApplicationFormPage() {
                 <p><strong>Gender:</strong> {data.gender}</p>
                 <p><strong>Blood Group:</strong> {data.bloodGroup}</p>
                 <p><strong>Address:</strong> {data.addressLine1}, {data.addressLine2}, {data.city}, {data.state} - {data.pinCode}</p>
-                <p><strong>Father:</strong> {data.fatherName} — {data.fatherOccupation} ({data.fatherMobile})</p>
-                <p><strong>Mother:</strong> {data.motherName} — {data.motherOccupation} ({data.motherMobile})</p>
+                <p><strong>Father:</strong> {data.fatherName} {data.fatherDeceased ? '— (Deceased)' : `— ${data.fatherOccupation} (${data.fatherMobile})`}</p>
+                <p><strong>Mother:</strong> {data.motherName} {data.motherDeceased ? '— (Deceased)' : `— ${data.motherOccupation} (${data.motherMobile})`}</p>
                 <p><strong>Emergency Contact:</strong> {data.emergencyContactPerson} ({data.emergencyMobile})</p>
               </div>
             </div>
@@ -915,12 +1145,8 @@ export default function ApplicationFormPage() {
                 {t('Hostel Preferences', 'छात्रावास प्राथमिकताएं')}</h3>
               <div className="space-y-2 text-sm">
                 <p><strong>Vertical:</strong> {data.vertical === 'boys-hostel' ? 'Boys Hostel' : data.vertical === 'girls-ashram' ? 'Girls Ashram' : 'Dharamshala'}</p>
-                <p><strong>Room Type:</strong> {data.roomType}</p>
                 <p><strong>Duration:</strong> {data.duration}</p>
                 <p><strong>Joining Date:</strong> {data.joiningDate}</p>
-                {data.specialRequirements && (
-                  <p><strong>Special Requirements:</strong> {data.specialRequirements}</p>
-                )}
               </div>
             </div>
 
@@ -952,9 +1178,37 @@ export default function ApplicationFormPage() {
               <h3 className="text-lg font-semibold mb-4" style={{ color: 'var(--text-primary)' }}>
                 {t('Documents', 'दस्तावेज़')}</h3>
               <div className="space-y-2 text-sm">
-                <p><strong>Photo:</strong> {data.photoFile?.name || 'Not uploaded'}</p>
+                <p><strong>CA Student:</strong> {data.isCAStudent ? 'Yes' : 'No'}</p>
+                <p><strong>Caste Certificate:</strong> {data.casteCertificate?.name || 'Not uploaded'}</p>
+                {!data.isCAStudent ? (
+                  <p><strong>Bonafide Certificate:</strong> {data.bonafideCertificate?.name || 'Not uploaded'}</p>
+                ) : (
+                  <p><strong>CA Firm Letter:</strong> {data.caFirmLetter?.name || 'Not uploaded'}</p>
+                )}
                 <p><strong>Birth Certificate:</strong> {data.birthCertificate?.name || 'Not uploaded'}</p>
-                <p><strong>Marksheet:</strong> {data.marksheet?.name || 'Not uploaded'}</p>
+                <p><strong>Aadhaar / Voter ID:</strong> {data.aadhaarOrVoterId?.name || 'Not uploaded'}</p>
+                <p><strong>Address Proof:</strong> {data.addressProof?.name || 'Not uploaded'}</p>
+                <p>
+                  <strong>Marksheets (last 4):</strong>{' '}
+                  {Array.isArray(data.marksheets) && data.marksheets.length > 0
+                    ? `${data.marksheets.length} file(s) — ${data.marksheets.map((f: File) => f.name).join(', ')}`
+                    : 'Not uploaded'}
+                </p>
+                {!data.isCAStudent ? (
+                  <p><strong>Fee Receipt:</strong> {data.feeReceipt?.name || 'Not uploaded'}</p>
+                ) : (
+                  <p><strong>Registration Letter (CA 102-103):</strong> {data.registrationLetter?.name || 'Not uploaded'}</p>
+                )}
+                <p><strong>Local Guardian Aadhaar:</strong> {data.guardianAadhaar?.name || 'Not uploaded'}</p>
+                <p><strong>Medical Fitness Certificate:</strong> {data.medicalFitnessCertificate?.name || 'Not uploaded'}</p>
+                <p><strong>Photo:</strong> {data.photoFile?.name || 'Not uploaded'}</p>
+                {!data.fatherDeceased && (
+                  <p><strong>Photo with Father:</strong> {data.photoWithFather?.name || 'Not uploaded'}</p>
+                )}
+                {!data.motherDeceased && (
+                  <p><strong>Photo with Mother:</strong> {data.photoWithMother?.name || 'Not uploaded'}</p>
+                )}
+                <p><strong>Photo with Guardian:</strong> {data.photoWithGuardian?.name || 'Not uploaded'}</p>
                 {data.recommendationLetter && (
                   <p><strong>Recommendation Letter:</strong> {data.recommendationLetter.name}</p>
                 )}
@@ -962,27 +1216,16 @@ export default function ApplicationFormPage() {
             </div>
           </div>
 
-          <div className="card p-6 border-2" style={{ backgroundColor: 'var(--color-blue-50)', borderColor: 'var(--color-blue-200)' }}>
+          <div className="card p-6 border-2" style={{ backgroundColor: 'var(--color-green-50)', borderColor: 'var(--color-green-200)' }}>
             <h3 className="text-lg font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>
               {t('Declaration', 'घोषणा')}</h3>
-            <p className="text-sm mb-4" style={{ color: 'var(--text-secondary)' }}>
-              {t('I hereby declare that all the information provided above is true and correct to the best of my knowledge. I understand that any false information may result in rejection of my application.', 'मैं एतद्द्वारा घोषणा करता/करती हूं कि ऊपर दी गई सभी जानकारी मेरी सर्वोत्तम जानकारी के अनुसार सत्य और सही है। मैं समझता/समझती हूं कि कोई भी गलत जानकारी मेरे आवेदन की अस्वीकृति का कारण बन सकती है।')}</p>
-            <Checkbox
-              checked={data.declarationAccepted || false}
-              onChange={(e) => onChange('declarationAccepted', e.target.checked)}
-              label={t('I agree to the terms and conditions and declare that the information provided is accurate', 'मैं नियम और शर्तों से सहमत हूं और घोषणा करता/करती हूं कि प्रदान की गई जानकारी सटीक है')}
-              required
-            />
+            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+              {t('You have accepted all Rules, Instructions and Conditions in the previous step. By submitting, you confirm that all information provided is true and correct to the best of your knowledge.', 'आपने पिछले चरण में सभी नियम, निर्देश और शर्तें स्वीकार कर ली हैं। जमा करके, आप पुष्टि करते हैं कि प्रदान की गई सभी जानकारी आपकी सर्वोत्तम जानकारी के अनुसार सत्य और सही है।')}
+            </p>
           </div>
         </div>
       ),
-      validate: (data: any) => {
-        const errors: any = {};
-        if (!data.declarationAccepted) {
-          errors.declarationAccepted = 'You must accept the declaration to submit';
-        }
-        return Object.keys(errors).length > 0 ? errors : null;
-      },
+      validate: (data: any) => validateTermsAndConditions(data),
     },
   ];
 
@@ -1022,16 +1265,22 @@ export default function ApplicationFormPage() {
 
   const handleSubmit = async (data: any) => {
     try {
-      // Prepare submission data - remove File objects (not JSON-serializable)
-      const documentFields = ['photoFile', 'birthCertificate', 'marksheet', 'recommendationLetter'];
+      const singleFileFields = [
+        'photoFile', 'birthCertificate', 'casteCertificate',
+        'photoWithFather', 'photoWithMother', 'photoWithGuardian', 'recommendationLetter',
+        'bonafideCertificate', 'caFirmLetter',
+        'aadhaarOrVoterId', 'addressProof',
+        'feeReceipt', 'registrationLetter', 'guardianAadhaar', 'medicalFitnessCertificate',
+      ];
+      const multiFileFields = ['marksheets'];
       const submissionData = { ...data };
-      for (const fieldName of documentFields) {
-        if (submissionData[fieldName] instanceof File) {
-          delete submissionData[fieldName];
-        }
+      for (const fieldName of singleFileFields) {
+        if (submissionData[fieldName] instanceof File) delete submissionData[fieldName];
+      }
+      for (const fieldName of multiFileFields) {
+        if (Array.isArray(submissionData[fieldName])) delete submissionData[fieldName];
       }
 
-      // 1. Create the application first
       const response = await fetch('/api/applications', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1040,40 +1289,42 @@ export default function ApplicationFormPage() {
           applicant_mobile: data.applicantMobile || localStorage.getItem('otp_verified_mobile') || '',
           applicant_email: data.applicantEmail || localStorage.getItem('otp_verified_email') || '',
           vertical: 'boys-hostel',
-          status: 'SUBMITTED',
-          submittedAt: new Date().toISOString(),
+          // status omitted: server forces DRAFT for hostel
         }),
       });
-
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({} as any));
-        const errorMessage = errorData.message || errorData.error || 'Failed to submit application';
-        throw new Error(errorMessage);
+        throw new Error(errorData.message || errorData.error || 'Failed to submit application');
       }
-
       const result = await response.json();
       const application = result.data || result;
       const applicationId = application.id;
       const trackingNumber = application.trackingNumber || application.tracking_number;
 
-      // 2. Upload documents in the background (non-blocking)
-      for (const fieldName of documentFields) {
+      for (const fieldName of singleFileFields) {
         const file = data[fieldName];
         if (file instanceof File) {
-          try {
-            await uploadDocument(file, fieldName, applicationId);
-          } catch (uploadError: any) {
-            console.warn(`Document upload for ${fieldName} failed (can be re-uploaded later):`, uploadError);
+          try { await uploadDocument(file, fieldName, applicationId); }
+          catch (uploadError: any) { console.warn(`Upload ${fieldName} failed:`, uploadError); }
+        }
+      }
+      for (const fieldName of multiFileFields) {
+        const files = data[fieldName];
+        if (Array.isArray(files)) {
+          for (const file of files) {
+            if (file instanceof File) {
+              try { await uploadDocument(file, fieldName, applicationId); }
+              catch (uploadError: any) { console.warn(`Upload ${fieldName} failed:`, uploadError); }
+            }
           }
         }
       }
 
       localStorage.removeItem('application_draft_boys-hostel');
-      window.location.href = `/apply/boys-hostel/success?trackingNumber=${trackingNumber}`;
-    } catch (error: any) {
-      console.error('Failed to submit application:', error);
-      alert(`Failed to submit application: ${error.message || 'Please try again.'}`);
-      throw error;
+      setPendingApplicationId(applicationId);
+      setPendingTrackingNumber(trackingNumber);
+    } catch (e: any) {
+      setPaymentError(e.message || 'Submission failed');
     }
   };
 
@@ -1088,47 +1339,121 @@ export default function ApplicationFormPage() {
     );
   }
 
-  return (
-    <div className="min-h-screen" style={{ background: 'var(--bg-page)' }}>
-      <header
-        className="px-6 py-4 border-b"
-        style={{
-          backgroundColor: 'var(--surface-primary)',
-          borderColor: 'var(--border-primary)',
-        }}
-      >
-        <div className="mx-auto max-w-6xl flex items-center justify-between">
-          <Link href="/apply" className="flex items-center gap-3">
-            <ArrowLeft className="w-5 h-5" style={{ color: 'var(--text-secondary)' }} />
-            <div>
-              <h1 className="text-lg font-semibold" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-serif)' }}>
-                {t('Boys Hostel Application', 'बालक छात्रावास आवेदन')}</h1>
-              <p className="text-caption">{t('Application Form', 'आवेदन पत्र')}</p>
+  if (pendingApplicationId) {
+    return (
+      <AdmissionsGate vertical="boys-hostel">
+        <div className="min-h-screen" style={{ background: 'var(--bg-page)' }}>
+          <header
+            className="px-6 py-4 border-b"
+            style={{
+              backgroundColor: 'var(--surface-primary)',
+              borderColor: 'var(--border-primary)',
+            }}
+          >
+            <div className="mx-auto max-w-6xl flex items-center justify-between">
+              <Link href="/apply" className="flex items-center gap-3">
+                <ArrowLeft className="w-5 h-5" style={{ color: 'var(--text-secondary)' }} />
+                <div>
+                  <h1 className="text-lg font-semibold" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-serif)' }}>
+                    {t('Boys Hostel Application', 'बालक छात्रावास आवेदन')}</h1>
+                  <p className="text-caption">{t('Application Form', 'आवेदन पत्र')}</p>
+                </div>
+              </Link>
+              <div className="flex items-center gap-4">
+                <nav className="hidden md:flex items-center gap-6">
+                  <Link href="/" className="nav-link">{t('Home', 'होम')}</Link>
+                  <Link href="/apply" className="nav-link">{t('Apply Now', 'अभी आवेदन करें')}</Link>
+                  <Link href="/check-status" className="nav-link">{t('Check Status', 'स्थिति जांचें')}</Link>
+                  <Link href="/login" className="nav-link">{t('Login', 'लॉगिन')}</Link>
+                </nav>
+                <LanguageToggle />
+              </div>
             </div>
-          </Link>
-          <div className="flex items-center gap-4">
-            <nav className="hidden md:flex items-center gap-6">
-              <Link href="/" className="nav-link">{t('Home', 'होम')}</Link>
-              <Link href="/apply" className="nav-link">{t('Apply Now', 'अभी आवेदन करें')}</Link>
-              <Link href="/check-status" className="nav-link">{t('Check Status', 'स्थिति जांचें')}</Link>
-              <Link href="/login" className="nav-link">{t('Login', 'लॉगिन')}</Link>
-            </nav>
-            <LanguageToggle />
-          </div>
-        </div>
-      </header>
+          </header>
 
-      <main className="px-6 py-12">
-        <div className="mx-auto max-w-5xl">
-          <FormWizard
-            steps={wizardSteps}
-            initialData={initialData}
-            onSaveDraft={handleSaveDraft}
-            onSubmit={handleSubmit}
-            onSubmitLabel="Submit Application"
-          />
+          <main className="px-6 py-12">
+            <div className="mx-auto max-w-5xl">
+              <div className="card">
+                <div className="p-6 md:p-8">
+                  <div className="mb-6">
+                    <h2 className="text-xl font-semibold mb-1" style={{ color: 'var(--text-primary)' }}>
+                      {t('Admission Fee Payment', 'प्रवेश शुल्क भुगतान')}
+                    </h2>
+                    <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                      {t(
+                        `Your application ${pendingTrackingNumber} is saved. Complete the ₹500 admission fee to submit it for review.`,
+                        `आपका आवेदन ${pendingTrackingNumber} सहेज लिया गया है। समीक्षा हेतु जमा करने के लिए ₹500 प्रवेश शुल्क पूर्ण करें।`,
+                      )}
+                    </p>
+                  </div>
+
+                  <AdmissionFeeStep applicationId={pendingApplicationId} />
+
+                  {paymentError && (
+                    <div
+                      className="mt-4 p-4 rounded-lg border-l-4"
+                      style={{
+                        backgroundColor: 'var(--color-red-50, #fef2f2)',
+                        borderLeftColor: 'var(--color-red-500, #ef4444)',
+                      }}
+                    >
+                      <p className="text-sm font-medium" style={{ color: 'var(--color-red-700, #b91c1c)' }}>
+                        {paymentError}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </main>
         </div>
-      </main>
-    </div>
+      </AdmissionsGate>
+    );
+  }
+
+  return (
+    <AdmissionsGate vertical="boys-hostel">
+      <div className="min-h-screen" style={{ background: 'var(--bg-page)' }}>
+        <header
+          className="px-6 py-4 border-b"
+          style={{
+            backgroundColor: 'var(--surface-primary)',
+            borderColor: 'var(--border-primary)',
+          }}
+        >
+          <div className="mx-auto max-w-6xl flex items-center justify-between">
+            <Link href="/apply" className="flex items-center gap-3">
+              <ArrowLeft className="w-5 h-5" style={{ color: 'var(--text-secondary)' }} />
+              <div>
+                <h1 className="text-lg font-semibold" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-serif)' }}>
+                  {t('Boys Hostel Application', 'बालक छात्रावास आवेदन')}</h1>
+                <p className="text-caption">{t('Application Form', 'आवेदन पत्र')}</p>
+              </div>
+            </Link>
+            <div className="flex items-center gap-4">
+              <nav className="hidden md:flex items-center gap-6">
+                <Link href="/" className="nav-link">{t('Home', 'होम')}</Link>
+                <Link href="/apply" className="nav-link">{t('Apply Now', 'अभी आवेदन करें')}</Link>
+                <Link href="/check-status" className="nav-link">{t('Check Status', 'स्थिति जांचें')}</Link>
+                <Link href="/login" className="nav-link">{t('Login', 'लॉगिन')}</Link>
+              </nav>
+              <LanguageToggle />
+            </div>
+          </div>
+        </header>
+
+        <main className="px-6 py-12">
+          <div className="mx-auto max-w-5xl">
+            <FormWizard
+              steps={wizardSteps}
+              initialData={initialData}
+              onSaveDraft={handleSaveDraft}
+              onSubmit={handleSubmit}
+              onSubmitLabel="Submit Application"
+            />
+          </div>
+        </main>
+      </div>
+    </AdmissionsGate>
   );
 }
