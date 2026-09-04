@@ -38,12 +38,19 @@
  * recoverable afterwards — re-run a password reset if lost.
  *
  * For every student row, a matching `applications` record is also created
- * (status APPROVED, linked via student_user_id) carrying the same
- * personal/address/guardian/emergency/academic/hostel data the real
- * application form would have collected. This is what the rest of the app
- * (notably the parent portal, which looks up a student by matching the
- * parent's mobile against applications.data.guardian_info) actually reads —
- * without it, a migrated student would be invisible to their parent.
+ * (current_status APPROVED, payment_status PAID, linked via student_user_id)
+ * carrying the same personal/address/guardian/emergency/academic/hostel
+ * data the real application form would have collected. This is what the
+ * rest of the app actually reads, not the users/fees tables alone:
+ * - The parent portal looks up a student by matching the parent's mobile
+ *   against applications.data.guardian_info — without this record, a
+ *   migrated student would be invisible to their parent.
+ * - applications.payment_status is a separate column from fees.status —
+ *   the real PhonePe flow sets both together (see payments/phonepe/verify
+ *   and /webhook routes) as two denormalized signals of the same fact, and
+ *   the superintendent/trustee "Payment Status" UI badge reads only this
+ *   column, never joining fees. Setting it to PAID here (matching the fees
+ *   rows we also create as PAID) keeps that badge correct.
  *
  * Deliberately NOT captured by this import:
  * - Documents (photo, certificates, marksheets, Aadhaar, etc.) — these are
@@ -728,8 +735,8 @@ async function importStudents(client, studentRows, dryRun, trackingCache) {
         migration_imported_at: new Date().toISOString(),
       };
       await client.query(
-        `INSERT INTO applications (tracking_number, type, vertical, applicant_mobile, applicant_email, applicant_name, student_user_id, current_status, data, submitted_at, reviewed_at, approved_at)
-         VALUES ($1, 'NEW', $2, $3, $4, $5, $6, 'APPROVED', $7, NOW(), NOW(), NOW())`,
+        `INSERT INTO applications (tracking_number, type, vertical, applicant_mobile, applicant_email, applicant_name, student_user_id, current_status, payment_status, data, submitted_at, reviewed_at, approved_at)
+         VALUES ($1, 'NEW', $2, $3, $4, $5, $6, 'APPROVED', 'PAID', $7, NOW(), NOW(), NOW())`,
         [trackingNumber, vertical, mobile, email, full_name, studentId, JSON.stringify(applicationData)]
       );
 
@@ -993,8 +1000,8 @@ async function importClientFormat(client, workbook, vertical, academicSession, d
             migration_imported_at: new Date().toISOString(),
           };
           const { rows: appRows } = await client.query(
-            `INSERT INTO applications (tracking_number, type, vertical, applicant_mobile, applicant_name, student_user_id, current_status, data, submitted_at, reviewed_at, approved_at)
-             VALUES ($1, 'NEW', $2, $3, $4, $5, 'APPROVED', $6, NOW(), NOW(), NOW())
+            `INSERT INTO applications (tracking_number, type, vertical, applicant_mobile, applicant_name, student_user_id, current_status, payment_status, data, submitted_at, reviewed_at, approved_at)
+             VALUES ($1, 'NEW', $2, $3, $4, $5, 'APPROVED', 'PAID', $6, NOW(), NOW(), NOW())
              RETURNING id`,
             [trackingNumber, vertical, d.mobile, d.full_name, studentId, JSON.stringify(applicationData)]
           );
