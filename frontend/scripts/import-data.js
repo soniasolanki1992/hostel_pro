@@ -766,12 +766,47 @@ async function importStudents(client, studentRows, dryRun, trackingCache) {
 // room number. Every creation/growth is reported via `event` so the caller
 // can log it — nothing here is silent. Always succeeds when roomNumber is
 // given; returns null only when there's no room_number to resolve at all.
-async function resolveOrCreateClientRoom(client, roomNumber, vertical, dryRun) {
+//
+// `roomState` (a Map, live for one whole importClientFormat run) is required
+// in dry-run mode: since nothing is actually written to the DB, a fresh
+// SELECT after a simulated "create" would find nothing and wrongly report a
+// second "create" for the same room instead of a "grow". roomState carries
+// the simulated capacity/occupied_count across rows so the same room number
+// referenced twice in one dry run is simulated correctly. It also simulates
+// the occupied_count bump that allocateRoom would normally apply (skipped
+// entirely in dry-run), so it must be advanced exactly once per successful
+// resolution, same as a real create-then-allocate pair would.
+async function resolveOrCreateClientRoom(client, roomNumber, vertical, dryRun, roomState) {
   if (!roomNumber) return null;
+
+  if (dryRun) {
+    const key = `${roomNumber}|${vertical}`;
+    if (!roomState.has(key)) {
+      const { rows } = await client.query(
+        'SELECT capacity, occupied_count FROM rooms WHERE room_number = $1 AND vertical = $2',
+        [roomNumber, vertical]
+      );
+      roomState.set(key, rows.length
+        ? { capacity: rows[0].capacity, occupied_count: rows[0].occupied_count }
+        : { capacity: 0, occupied_count: 0 });
+    }
+    const state = roomState.get(key);
+    let event = null;
+    if (state.capacity === 0) {
+      state.capacity = 1;
+      event = 'created';
+    } else if (state.occupied_count >= state.capacity) {
+      state.capacity += 1;
+      event = 'grown';
+    }
+    const room = { id: null, room_number: roomNumber, vertical, capacity: state.capacity, occupied_count: state.occupied_count, event };
+    state.occupied_count += 1; // simulates the allocateRoom bump, which dry-run never actually calls
+    return room;
+  }
+
   const { rows } = await client.query('SELECT * FROM rooms WHERE room_number = $1 AND vertical = $2', [roomNumber, vertical]);
 
   if (rows.length === 0) {
-    if (dryRun) return { id: null, room_number: roomNumber, vertical, capacity: 1, occupied_count: 0, event: 'created' };
     const { rows: created } = await client.query(
       `INSERT INTO rooms (room_number, vertical, floor, capacity, status) VALUES ($1, $2, 1, 1, 'AVAILABLE') RETURNING *`,
       [roomNumber, vertical]
@@ -781,7 +816,6 @@ async function resolveOrCreateClientRoom(client, roomNumber, vertical, dryRun) {
 
   const room = rows[0];
   if (room.occupied_count >= room.capacity) {
-    if (dryRun) return { ...room, capacity: room.capacity + 1, event: 'grown' };
     const { rows: grown } = await client.query(
       'UPDATE rooms SET capacity = capacity + 1 WHERE id = $1 RETURNING *',
       [room.id]
@@ -853,6 +887,8 @@ async function createFeeWithOptionalPayment(client, opts) {
 async function importClientFormat(client, workbook, vertical, academicSession, dryRun, trackingCache) {
   // mobile -> { studentId, applicationId, firstSeenSheet, firstSeenName, activeAllocationId, activeRoomId, activeRoomNumber }
   const seenMobiles = new Map();
+  // "roomNumber|vertical" -> { capacity, occupied_count } — dry-run-only simulated room state, see resolveOrCreateClientRoom.
+  const roomState = new Map();
   const result = {
     newStudents: 0, existingSupplemented: 0, roomAllocated: 0, roomTransferred: 0,
     roomsAutoCreated: 0, roomsCapacityGrown: 0,
@@ -917,7 +953,7 @@ async function importClientFormat(client, workbook, vertical, academicSession, d
 
       if (!entry) {
         // --- New student ---
-        const room = await resolveOrCreateClientRoom(client, d.room_number, vertical, dryRun);
+        const room = await resolveOrCreateClientRoom(client, d.room_number, vertical, dryRun, roomState);
         if (room?.event === 'created') {
           result.roomsAutoCreated++;
           result.notes.push(`${sheetName} row ${row.rowNumber}: room "${d.room_number}" auto-created (capacity 1, floor 1 placeholder)`);
@@ -990,7 +1026,7 @@ async function importClientFormat(client, workbook, vertical, academicSession, d
         result.notes.push(`${sheetName} row ${row.rowNumber}: existing student "${d.full_name}" (${d.mobile}) — added fee record`);
 
         if (d.room_number && d.room_number !== entry.activeRoomNumber) {
-          const newRoom = await resolveOrCreateClientRoom(client, d.room_number, vertical, dryRun);
+          const newRoom = await resolveOrCreateClientRoom(client, d.room_number, vertical, dryRun, roomState);
           if (newRoom.event === 'created') {
             result.roomsAutoCreated++;
             result.notes.push(`${sheetName} row ${row.rowNumber}: room "${d.room_number}" auto-created (capacity 1, floor 1 placeholder)`);
